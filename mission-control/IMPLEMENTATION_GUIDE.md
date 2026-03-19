@@ -1,56 +1,97 @@
-# Mission Control Implementation Guide
+# Mission Control Complete Implementation Guide
 
-This document explains how Mission Control is structured today, what has already been implemented, and how to continue building the remaining features.
+This is the full end-to-end implementation guide for **OpenClaw Mission Control**.
 
----
+It is intended to answer:
+- what Mission Control is
+- what has already been built
+- how the system is structured
+- how to run it locally
+- how to implement the remaining features
+- what the full roadmap looks like from start to finish
 
-# 1. Product goal
-
-Mission Control is a control-plane UI for OpenClaw.
-
-It combines:
-- an operational dashboard for agents, sessions, tasks, events, and health
-- an **Office View** where agents appear like desks/tables in a shared workspace
-- realtime visibility into live OpenClaw runtime presence
-- a foundation for future in-app interaction with the assistant
+This document is the canonical build guide for the project.
 
 ---
 
-# 2. Current implementation status
+# 1. Product vision
+
+Mission Control is a control-plane application for OpenClaw.
+
+It combines three ideas:
+
+1. **Ops dashboard**
+   - shows agents, sessions, tasks, events, health, and system activity
+
+2. **Office View**
+   - shows agents as desks/tables in rooms
+   - gives a spatial model of what the system is doing
+
+3. **Assistant workspace**
+   - eventually lets the user interact with Kite directly inside Mission Control
+   - supports observability first, then orchestration, then in-app collaboration
+
+The long-term goal is not just “a dashboard.”
+It is a **live command center for OpenClaw**.
+
+---
+
+# 2. End-state product goals
+
+Mission Control should eventually allow a user to:
+
+- see all active OpenClaw agents and sessions
+- understand what each agent is doing
+- detect blocked or stale work
+- inspect events and health in realtime
+- understand multi-agent collaboration spatially
+- assign work and send instructions
+- talk to Kite from inside the app
+- review history, audit trails, and runtime changes
+- operate from persistent storage rather than mock memory
+
+---
+
+# 3. Current implementation state
 
 ## Already implemented
 
 ### Backend
-- Fastify-based API in `apps/api`
-- route validation schemas for mutations and ID-based routes
-- websocket endpoint at `GET /ws/v1`
-- live OpenClaw runtime presence adapter
-- runtime sync loop
-- runtime change diffing + websocket broadcasts
-- mock/in-memory task/event persistence layer
-- PostgreSQL bootstrap SQL files + setup docs
+- Fastify API in `apps/api`
+- modular route layer
+- validation schemas for ID routes and mutations
+- websocket endpoint `GET /ws/v1`
+- live OpenClaw runtime presence integration
+- runtime snapshot diffing and broadcast updates
+- mock/in-memory task/event storage
+- Postgres bootstrap SQL and seed files
 
 ### Frontend
-- Next.js app-router app in `apps/web`
-- dashboard UI with:
-  - stats
-  - Office View
-  - sessions summary
-  - task board
-  - alerts
-  - events
-  - realtime status card
-- frontend now fetches from the backend API
-- first-pass websocket client path for realtime state/status
+- Next.js app-router frontend in `apps/web`
+- Mission Control dashboard shell
+- API-backed data fetching
+- websocket-backed realtime status/live update path
+- Office View + dashboard layout preserved from design direction
 
-### Shared contracts
-- domain models in `packages/contracts`
-- REST contract types
-- websocket contract types
+### Realtime
+- `connection.hello`
+- `overview.snapshot`
+- `health.updated`
+- `agent.updated`
+- `session.updated`
+- `task.updated`
+- `event.created`
+- runtime presence changes now broadcast live
+
+### Docs
+- setup docs
+- DB bootstrap docs
+- implementation checklist
+- this full implementation guide
 
 ---
 
-# 3. Repository structure
+# 4. Repository structure
 
 ```text
 apps/
@@ -78,414 +119,651 @@ mission-control/
 
 ---
 
-# 4. Backend architecture
+# 5. Architecture overview
 
-## 4.1 Main layers
+## 5.1 Backend
+The backend is the control plane.
 
-### `src/server.js`
-Bootstraps the Fastify server.
-Registers:
-- REST routes
-- websocket routes
-- runtime sync / integration startup
+Responsibilities:
+- aggregate runtime state
+- normalize entities
+- expose REST APIs
+- expose websocket updates
+- execute commands
+- eventually persist operational data
 
-### `src/api/`
-Transport layer.
-Responsible for:
-- route registration
-- request validation
-- HTTP response formatting
+## 5.2 Frontend
+The frontend is the operator surface.
 
-### `src/domain/`
-Application logic.
-Responsible for:
-- repository access
-- composing view models
-- commands/mutations
-- task/event/session logic
+Responsibilities:
+- render overview/dashboard state
+- render Office View
+- connect to REST + websocket
+- eventually host chat/intervention controls
 
-### `src/realtime/`
-Websocket handling.
-Responsible for:
-- connection hello
-- snapshot push
-- fanout broadcasting
-- heartbeat/health pushes
+## 5.3 Contracts package
+Shared types between frontend and backend.
 
-### `src/integrations.openclaw-runtime.js`
-Runtime adapter.
-Responsible for:
-- reading live OpenClaw runtime presence
-- mapping runtime output into Mission Control domain entities
-- diffing runtime snapshots
-- triggering live updates
+Responsibilities:
+- domain entities
+- API response/request shapes
+- websocket event payloads
 
 ---
 
-# 5. Frontend architecture
+# 6. Core domain model
 
-## 5.1 Main layers
+Mission Control revolves around these entities:
 
-### `app/`
-Next.js app-router UI.
-Key files include:
-- `app/page.tsx`
-- `app/layout.tsx`
-- `app/globals.css`
-- realtime/status UI helpers
+## Agent
+Represents a worker identity.
 
-### `lib/api.ts`
-Frontend API client.
-Responsible for fetching:
-- overview
-- agents
-- tasks
-- events
-- rooms
+## Session
+Represents a live runtime/execution context.
 
-### Realtime path
-Frontend connects to backend websocket and applies live state/snapshot updates.
+## Task
+Represents work tracked by Mission Control.
 
-Current state:
-- enough for live presence/status updates
-- not yet a full robust client-side state engine with reconnection/backoff/stale strategies
+## Event
+Represents a timeline record.
+
+## Room
+Represents a group/zone in Office View.
+
+## Placement
+Represents where an agent appears spatially in Office View.
 
 ---
 
-# 6. Feature breakdown
+# 7. Environment and local setup
 
-## 6.1 Overview dashboard
-Shows:
-- active agent count
-- active session count
-- task state counts
-- health
-- alerts
-- recent events
-
-### Data sources
-- `/api/v1/overview`
-- websocket `overview.snapshot`
-- websocket `health.updated`
-
----
-
-## 6.2 Office View
-Shows agents in grouped rooms.
-
-### Current behavior
-- live runtime agents are grouped into generated runtime room(s)
-- office cards reflect live presence when available
-- fallback/mock task/event data still exists beside runtime presence
-
-### Current limitation
-Task linkage for live runtime agents is still not fully real.
-
----
-
-## 6.3 Sessions / live presence
-Current active OpenClaw sessions/subagents are mapped into:
-- agent cards
-- session entries
-- health/overview state
-
-### Current runtime source
-The backend currently uses OpenClaw CLI/runtime output as a lightweight integration source.
-
-### Current limitation
-This is not yet a fully abstracted gateway-native client.
-
----
-
-## 6.4 Realtime updates
-Current websocket events include:
-- `connection.hello`
-- `overview.snapshot`
-- `health.updated`
-- `agent.updated`
-- `session.updated`
-- `event.created`
-- `task.updated`
-
-### Current behavior
-Runtime changes trigger websocket updates so presence appears/disappears without refresh.
-
-### Current limitation
-Explicit removal/delete events are not yet first-class; removals are handled through snapshot resync.
-
----
-
-# 7. Database setup
-
-## Current database artifacts
-- `apps/api/db/migrations/0001_init.sql`
-- `apps/api/db/seed/0001_mock_seed.sql`
-- `apps/api/db/README.md`
-
-## Current reality
-Postgres bootstrap files exist, but the runtime repository is still primarily in-memory.
-
-That means:
-- SQL schema exists
-- setup path exists
-- the app is not yet fully reading/writing production data through Postgres
-
-## Goal of the DB layer
-Move these concerns into Postgres:
-- tasks
-- task history
-- retained events
-- rooms/placements
-- command audit
-- eventually cached runtime snapshots if useful
-
----
-
-# 8. Environment variables
-
-Use a root `.env` file.
+## 7.1 `.env`
+Place `.env` in the repo root.
 
 Example:
 
 ```env
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/mission_control
 MISSION_CONTROL_API_URL=http://localhost:4000
+NEXT_PUBLIC_MISSION_CONTROL_API_URL=http://localhost:4000
 HOST=0.0.0.0
 PORT=4000
 NODE_ENV=development
-NEXT_PUBLIC_MISSION_CONTROL_API_URL=http://localhost:4000
 ```
 
----
-
-# 9. Local setup
-
-## 9.1 Install dependencies
+## 7.2 Install
 
 ```bash
-cd /path/to/mission-control
 npm install
 ```
 
-## 9.2 Create database
+## 7.3 Create database
 
 ```bash
 createdb mission_control
 ```
 
-## 9.3 Run migration
+## 7.4 Run migrations
 
 ```bash
 npm run db:migrate
 ```
 
-## 9.4 Seed mock data
+## 7.5 Seed mock data
 
 ```bash
 npm run db:seed
 ```
 
-## 9.5 Start backend
+## 7.6 Start API
 
 ```bash
 npm run dev:api
 ```
 
-## 9.6 Start frontend
+## 7.7 Start web
 
 ```bash
 npm run dev:web
 ```
 
-Frontend:
-- `http://localhost:3000`
-
-API:
-- `http://localhost:4000/api/v1/overview`
-
----
-
-# 10. How the live presence feature works
-
-## Step 1 — runtime sync
-The backend periodically reads active OpenClaw runtime presence.
-
-## Step 2 — map into domain model
-Runtime output is transformed into Mission Control entities.
-
-## Step 3 — diff snapshots
-The current snapshot is compared to the previous snapshot.
-
-## Step 4 — publish changes
-On change, websocket events are broadcast.
-
-## Step 5 — UI updates
-Frontend receives those events and refreshes displayed state.
+## 7.8 URLs
+- Web: `http://localhost:3000`
+- API: `http://localhost:4000/api/v1/overview`
+- WebSocket: `ws://localhost:4000/ws/v1`
 
 ---
 
-# 11. How to continue implementation
+# 8. Database bootstrap
 
-## Phase 1 — Presence mode
-Status: mostly implemented.
+Current DB bootstrap files:
+- `apps/api/db/migrations/0001_init.sql`
+- `apps/api/db/seed/0001_mock_seed.sql`
+- `apps/api/db/README.md`
 
-Includes:
-- live assistant/session visibility
-- realtime presence updates
-- Office View presence
+## Important note
+The app is **not yet fully DB-backed**.
 
-### Remaining polish
-- better stale/offline detection
+Right now:
+- schema exists
+- migration path exists
+- seed path exists
+- runtime/task/event repository is still partly in-memory
+
+That is intentional for the current stage.
+
+---
+
+# 9. Current API surface
+
+## Read routes
+- `GET /health`
+- `GET /api/v1/health`
+- `GET /api/v1/overview`
+- `GET /api/v1/agents`
+- `GET /api/v1/agents/:id`
+- `GET /api/v1/sessions`
+- `GET /api/v1/sessions/:id`
+- `GET /api/v1/tasks`
+- `GET /api/v1/tasks/:id`
+- `GET /api/v1/events`
+- `GET /api/v1/rooms`
+
+## Write routes
+- `POST /api/v1/tasks`
+- `PATCH /api/v1/tasks/:id`
+- `POST /api/v1/tasks/:id/assign`
+- `POST /api/v1/tasks/:id/retry`
+- `POST /api/v1/sessions/:id/message`
+- `POST /api/v1/sessions/:id/stop`
+
+## WebSocket
+- `GET /ws/v1`
+
+---
+
+# 10. Current realtime protocol
+
+Current websocket events include:
+- `connection.hello`
+- `overview.snapshot`
+- `health.updated`
+- `agent.updated`
+- `session.updated`
+- `task.updated`
+- `event.created`
+
+Current behavior:
+- initial hello + snapshot on connect
+- runtime changes are diffed and broadcast
+- removals are currently reconciled through `overview.snapshot`
+
+---
+
+# 11. Start-to-finish implementation roadmap
+
+This is the recommended order for the entire product.
+
+---
+
+# Phase 0 — Foundation and scaffolding
+
+## Goal
+Create a working monorepo structure and agree on contracts.
+
+## Delivered
+- root workspace config
+- `apps/api`
+- `apps/web`
+- `packages/contracts`
+- planning docs
+- wireframes
+- initial README/docs
+
+## Why it mattered
+Without this, later work would drift.
+
+---
+
+# Phase 1 — Presence mode
+
+## Goal
+Make Mission Control show **real OpenClaw presence** instead of only static mock agents.
+
+## What Phase 1 includes
+- live runtime adapter
+- mapping active OpenClaw sessions/subagents into Mission Control entities
+- generated runtime room
+- showing real active assistant presence in Office View / dashboard
+
+## Delivered
+- runtime integration path
+- live runtime-backed agents/sessions
+- overview/health linked to runtime presence
+- runtime sync loop
+
+## Remaining Phase 1 polish
 - richer status mapping
-- cleaner room placement rules
-- explicit delete/remove websocket events
+- better stale/offline detection
+- configurable room placement rules
+- richer runtime metadata enrichment
+- better live task linkage
 
 ---
 
-## Phase 2 — Talk to Kite inside Mission Control
-This is the next major product feature.
+# Phase 1.5 — Live runtime broadcasting
 
-### Goal
-Add an in-app chat panel or drawer that lets the user talk to the assistant from Mission Control itself.
+## Goal
+Make presence updates appear in the UI immediately without refresh.
 
-### Required pieces
+## What Phase 1.5 includes
+- runtime snapshot diffing
+- broadcast of runtime changes over websocket
+- overview resync when entities disappear
+- live UI updates for appearance/disappearance/change
 
-#### Frontend
-- chat panel component
-- session/thread selector
-- message list
-- input box
-- loading/streaming states
+## Delivered
+- runtime diff logic
+- `agent.updated`
+- `session.updated`
+- `overview.snapshot`
+- `health.updated`
+- UI refresh path for runtime changes
 
-#### Backend
-- route to send message into current OpenClaw session
-- optional route to fetch recent transcript/messages
-- optional streaming or polling mechanism for responses
+## Remaining polish
+- explicit removal/delete events instead of relying on snapshot reconciliation
+- reconnect/backoff UX
+- stale/disconnected banners and state treatment
 
-#### Integration
-Possible backend actions:
-- send session message to active assistant session
-- fetch session history
-- map transcript into Mission Control message format
+---
 
-### Suggested UI shape
-- right-side drawer called **Talk to Kite**
-- click current live assistant card to open it
-- show recent conversation + input field
+# Phase 2 — Talk to Kite inside Mission Control
 
-### Recommended build order
-1. add backend route for message send
-2. add backend route for transcript/history read
-3. build chat drawer UI
-4. wire it to active assistant session
+## Goal
+Add a chat surface inside Mission Control so the user can interact with Kite directly.
+
+## Product result
+The user opens Mission Control and can:
+- click Kite’s live card
+- open a chat drawer/panel
+- send a message
+- receive a reply
+- inspect the current assistant session
+
+## Required backend work
+- route to send messages into the active assistant session
+- route to fetch recent transcript/history
+- optional reply streaming path or message polling
+- route/session resolution logic for active assistant session
+
+## Required frontend work
+- chat drawer/panel
+- transcript list
+- message input
+- loading/streaming state
+- error/disconnected state
+- optional session picker
+
+## Suggested implementation order
+1. add transcript/history API route
+2. add send-message API route
+3. add chat drawer UI
+4. connect to active assistant session
 5. add live reply updates
 
----
-
-## Phase 3 — Real persistence
-Move off the in-memory repository.
-
-### Replace with Postgres-backed repository
-Target:
-- `tasks`
-- `task_history`
-- `events`
-- `rooms`
-- `placements`
-- `command_audit`
-
-### Recommended steps
-1. create repository interface boundary
-2. implement Postgres repository
-3. switch task/event flows to DB
-4. retain websocket broadcasts on successful writes
+## Definition of done
+- user can talk to Kite inside the app
+- reply appears in app reliably
+- active session is resolved automatically or chosen explicitly
+- errors are handled cleanly
 
 ---
 
-## Phase 4 — Better OpenClaw integration
-Current runtime integration is already useful, but not the final shape.
+# Phase 3 — Real persistence
 
-### Improve by adding
-- proper OpenClaw client abstraction
-- gateway-native integration where possible
-- richer health/node/session metadata
-- better error handling / degraded-state behavior
+## Goal
+Move Mission Control-owned state off in-memory storage and into Postgres.
+
+## What should become persistent
+- tasks
+- task history
+- events
+- rooms
+- placements
+- command audit
+- optionally runtime snapshots/cache
+
+## Required backend work
+- repository abstraction boundary
+- Postgres repository implementation
+- migration-driven schema usage
+- read/write flow moved off in-memory arrays
+- websocket broadcast triggered after DB writes
+
+## Suggested implementation order
+1. define repository interface
+2. implement Postgres-backed repository
+3. move tasks + task history first
+4. move events next
+5. move rooms/placements next
+6. add command audit
+
+## Definition of done
+- restart no longer wipes Mission Control-owned data
+- tasks/events persist across runs
+- db-backed writes still trigger realtime updates
 
 ---
 
-# 12. Recommended next engineering tasks
+# Phase 4 — Better OpenClaw integration depth
 
-## Best immediate next task
-Build **Phase 2: Talk to Kite panel**.
+## Goal
+Replace the current lightweight runtime adapter with a more robust integration boundary.
 
-Why:
-- presence mode now exists
-- live runtime presence now updates
-- the next obvious user-facing value is interacting with Kite from inside Mission Control
+## Improve
+- better OpenClaw client abstraction
+- richer gateway/node/health/session metadata
+- stronger failure handling
+- cleaner transport boundaries
+- less CLI-shaped coupling
 
-## If you want backend-first first
-Do this order:
-1. transcript/history route
-2. send-message route
-3. websocket reply updates
-4. chat drawer UI
+## Suggested work
+1. formalize runtime integration module interface
+2. isolate mapping logic from transport acquisition
+3. enrich session/agent health metadata
+4. expose clearer degraded-state semantics
 
-## If you want data-first first
-Do this order:
-1. Postgres repository implementation
-2. migrate task/event storage off memory
-3. keep live runtime adapter on top
+## Definition of done
+- runtime adapter is clearly abstracted
+- richer and more stable domain mapping
+- backend no longer feels tied to a thin first-pass runtime scraping approach
 
 ---
 
-# 13. Known limitations
+# Phase 5 — Orchestration controls
+
+## Goal
+Turn Mission Control into a real intervention surface, not just a viewer.
+
+## Features
+- assign/reassign tasks
+- retry failed work
+- stop/pause sessions
+- send intervention messages
+- inspect command/audit trail
+
+## Current status
+Partial groundwork exists.
+
+Already present:
+- task mutations
+- session stop/message endpoints
+
+Still needed:
+- polished UI controls
+- audit views
+- stronger validation/permissions
+- better operator workflow in the frontend
+
+## Definition of done
+- operator can intervene cleanly from UI
+- actions are visible, auditable, and reflected in realtime
+
+---
+
+# Phase 6 — Historical views and auditability
+
+## Goal
+Make Mission Control useful for debugging and analysis, not only live operations.
+
+## Features
+- persisted events timeline
+- retained task history
+- command audit
+- session history correlation
+- possibly time-window filters and replay-ish behavior
+
+## Suggested order
+1. persist events
+2. add event filters and pagination
+3. add command audit UI
+4. add richer history/detail panes
+
+## Definition of done
+- operator can answer “what happened?” after the fact
+- event/task/session history is inspectable and durable
+
+---
+
+# Phase 7 — UX polish and operator reliability
+
+## Goal
+Make Mission Control feel trustworthy and production-shaped.
+
+## Needed improvements
+- loading states
+- reconnect/backoff behavior
+- stale/disconnected UI
+- clearer error surfaces
+- accessibility review
+- keyboard navigation
+- denser but more readable component structure
+- Office View layout polish
+
+## Definition of done
+- app remains legible during failures
+- realtime behavior is understandable
+- operators trust what they are seeing
+
+---
+
+# Phase 8 — Advanced rooming and collaboration model
+
+## Goal
+Move beyond a generated runtime room into configurable spaces.
+
+## Features
+- custom rooms
+- room assignment rules
+- placement persistence
+- team/workflow grouping
+- room filters
+- maybe operator-specific saved layouts
+
+## Definition of done
+- Office View becomes an intentional workspace, not only a generated cluster
+
+---
+
+# Phase 9 — Smarter analytics / intelligence layer
+
+## Goal
+Make Mission Control proactively informative.
+
+## Potential features
+- blocked work detection
+- stale session recommendations
+- workload balancing suggestions
+- summary generation
+- “why is this blocked?” explanations
+- anomaly surfacing
+
+## Definition of done
+- Mission Control helps interpret system state, not only display it
+
+---
+
+# 12. Full implementation order recommendation
+
+If building from today forward, this is the recommended sequence:
+
+1. Presence mode
+2. Live runtime broadcasting
+3. Talk to Kite panel
+4. Postgres-backed repository
+5. Better OpenClaw integration boundary
+6. Frontend orchestration controls
+7. Event/audit persistence and history
+8. UX resilience and polish
+9. Configurable office/room model
+10. Intelligence/analytics layer
+
+---
+
+# 13. Practical engineering task list by area
+
+## Backend next tasks
+- create transcript/history route for assistant session
+- create assistant session resolution helper
+- persist tasks/events to Postgres
+- add runtime delete/remove websocket events
+- formalize repository interfaces
+- formalize OpenClaw client abstraction
+
+## Frontend next tasks
+- build Talk to Kite drawer
+- split dashboard into reusable components
+- add richer websocket state handling
+- add stale/disconnected UX
+- add action controls on agent/session/task cards
+
+## Data next tasks
+- hook current SQL schema into repository layer
+- add DB-backed tasks/events/rooms
+- preserve websocket fanout on successful writes
+
+---
+
+# 14. How to implement Phase 2 specifically
+
+## Frontend spec
+Add a right-side drawer called **Talk to Kite**.
+
+### Contents
+- session badge
+- connection status
+- recent messages
+- message composer
+- send button
+
+### Entry points
+- click Kite card
+- top-nav action button
+- maybe command palette later
+
+## Backend spec
+Add:
+- `GET /api/v1/chat/session` or equivalent assistant-session resolver
+- `GET /api/v1/chat/history`
+- `POST /api/v1/chat/message`
+
+## Realtime enhancement
+Optionally stream replies via websocket or trigger snapshot refresh on new messages.
+
+---
+
+# 15. How to implement Phase 3 specifically
+
+## Step 1
+Create repository interfaces:
+- tasks repository
+- events repository
+- rooms repository
+- command audit repository
+
+## Step 2
+Implement Postgres adapters.
+
+## Step 3
+Replace in-memory writes with DB writes.
+
+## Step 4
+Keep websocket fanout after successful persistence.
+
+## Step 5
+Move read endpoints to DB-backed reads.
+
+---
+
+# 16. Known limitations right now
 
 Current limitations include:
-- task correlation for live runtime agents is still partial
-- some event/task data is still mocked/in-memory
-- runtime integration is CLI-shaped, not yet fully abstracted client-side
-- explicit websocket delete events are not yet first-class
-- reconnect/stale UX can still improve
+- live task correlation is still partial
+- some event/task data remains mock/in-memory
+- runtime adapter is still a first-pass implementation
+- websocket removal handling is still partly snapshot-based
+- frontend reconnect/state resiliency can improve
+- chat-in-app is not implemented yet
+- Postgres is not yet the active storage layer for core entities
 
 ---
 
-# 14. Definition of done for the major features
+# 17. Definition of done by milestone
 
 ## Presence mode done when
-- active assistant and subagents show live
-- appear/disappear without refresh
-- Office View reflects runtime changes reliably
-- stale/offline state is visually clear
+- live assistant/session presence is visible
+- appears/disappears without refresh
+- Office View reflects runtime changes
+- stale/offline state is reasonably surfaced
 
 ## Chat mode done when
-- user can talk to Kite from inside Mission Control
-- current session is selectable or auto-resolved
-- replies appear in the app
-- failures/disconnects are handled gracefully
+- user can message Kite from Mission Control
+- replies render in app
+- active session resolves correctly
+- failures/disconnects are handled
 
-## Persistence done when
-- tasks/events/rooms are backed by Postgres
-- app restart does not wipe those entities
-- realtime broadcasts still work against DB writes
+## Persistence mode done when
+- tasks/events/rooms survive restart
+- DB becomes source of truth for Mission Control-owned data
+- realtime updates still work against DB writes
+
+## Operations mode done when
+- user can inspect, intervene, assign, retry, and stop from UI
+- changes are auditable and reflected live
 
 ---
 
-# 15. Related docs
+# 18. Best next step right now
+
+The strongest next step is:
+
+## Build Phase 2 — Talk to Kite inside Mission Control
+
+Reason:
+- presence is now live
+- runtime updates are now live
+- the next obvious user value is actual in-app interaction
+
+If backend/data-first is preferred instead, the alternative next step is:
+- implement Postgres-backed repositories before adding chat
+
+---
+
+# 19. Related documents
 
 Also read:
+- `README.md`
+- `mission-control/IMPLEMENTATION_CHECKLIST.md`
 - `mission-control/MONOREPO.md`
 - `mission-control/WIREFRAMES.md`
-- `mission-control/IMPLEMENTATION_CHECKLIST.md`
 - `apps/api/db/README.md`
 
 ---
 
-# 16. Short version
+# 20. Short roadmap summary
 
-If you only want the practical roadmap:
+If you only need the compact version:
 
-1. Presence mode — done enough to use
-2. Phase 2 — add Talk to Kite panel
-3. Replace in-memory repository with Postgres
-4. Improve OpenClaw integration depth
-5. Polish reliability and UX
+1. Foundation
+2. Presence mode
+3. Realtime presence updates
+4. Talk to Kite panel
+5. Postgres-backed persistence
+6. Better OpenClaw integration
+7. Frontend control workflows
+8. History/audit
+9. UX polish
+10. Configurable office model
+11. Intelligence layer
+
+That is the full start-to-finish Mission Control roadmap.
