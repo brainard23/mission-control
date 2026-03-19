@@ -1,0 +1,15 @@
+{
+  "name": "openclaw-mission-control",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run -ws build",
+    "dev:web": "npm --workspace @mission-control/web run dev",
+    "dev:api": "npm --workspace @mission-control/api run dev",
+    "typecheck": "npm run -ws typecheck"
+  }
+}
