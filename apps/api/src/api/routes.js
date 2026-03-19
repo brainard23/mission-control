@@ -1,6 +1,5 @@
 import { sendJson } from '../lib/http.js'
 import {
-  createTaskView,
   getAgentView,
   getAgentsView,
   getEventsView,
@@ -12,7 +11,7 @@ import {
   getTaskView,
   getTasksView,
 } from '../domain/services.js'
-import { assignTask, retryTask, sendSessionMessage, stopSession, updateTask } from '../domain/commands.js'
+import { assignTask, createTaskView, retryTask, sendSessionMessage, stopSession, updateTask } from '../domain/commands.js'
 import {
   assignTaskBodySchema,
   createTaskBodySchema,

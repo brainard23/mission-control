@@ -7,11 +7,12 @@ It combines:
 - an **Office View** where agents appear at tables/desks so multi-agent work is easier to understand visually
 
 ## Current status
-This repository currently contains a **mock MVP skeleton**:
+This repository currently contains a **mock MVP skeleton with a practical realtime pass**:
 - Fastify-based backend scaffold in `apps/api`
-- Next.js frontend in `apps/web`, now fetching dashboard data from the API
+- Next.js frontend in `apps/web`, fetching dashboard data from the API
 - shared contracts in `packages/contracts`
 - planning and design artifacts in `mission-control/`
+- first-pass PostgreSQL migration + seed files in `apps/api/db`
 
 It is not production-ready yet, but it is structured to evolve into:
 - Fastify backend
@@ -24,8 +25,8 @@ It is not production-ready yet, but it is structured to evolve into:
 
 ```text
 apps/
-  api/          # backend scaffold + mock data routes + websocket shell
-  web/          # Next.js app-router frontend shell + mock dashboard renderer
+  api/          # backend scaffold + mock routes + realtime + db bootstrap files
+  web/          # Next.js app-router frontend shell + live dashboard state
 packages/
   contracts/    # shared domain/API/websocket contracts
 mission-control/
@@ -38,6 +39,7 @@ mission-control/
 ## Prerequisites
 - Node.js 22+ recommended
 - npm 10+ recommended
+- PostgreSQL 15+ recommended for local DB setup
 
 ## Setup locally
 
@@ -52,7 +54,24 @@ cd mission-control
 npm install
 ```
 
-### 3. Run the API
+### 3. Optional: set up PostgreSQL locally
+Set a connection string:
+
+```bash
+export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/mission_control
+```
+
+Create the database and load the first migration + seed:
+
+```bash
+createdb mission_control
+npm run db:migrate
+npm run db:seed
+```
+
+More detail lives in `apps/api/db/README.md`.
+
+### 4. Run the API
 ```bash
 npm run dev:api
 ```
@@ -60,7 +79,7 @@ npm run dev:api
 This starts the backend on:
 - `http://localhost:4000`
 
-### 4. Run the web app
+### 5. Run the web app
 In a second terminal:
 ```bash
 npm run dev:web
@@ -83,6 +102,8 @@ npm run dev:api
 npm run dev:web
 npm run build
 npm run typecheck
+npm run db:migrate
+npm run db:seed
 ```
 
 ### API only
@@ -117,18 +138,36 @@ npm --workspace @mission-control/web run typecheck
 - `POST /api/v1/tasks/:id/retry`
 - `POST /api/v1/sessions/:id/message`
 - `POST /api/v1/sessions/:id/stop`
-- `GET /ws/v1` — websocket shell (hello + mock health heartbeat)
+- `GET /ws/v1` — websocket stream with hello, snapshot, mutation broadcasts, and health heartbeat
+
+## Realtime status
+Current websocket behavior is now intentionally useful, not just a shell:
+- sends `connection.hello` on connect
+- sends `overview.snapshot` immediately after connect for fast resync
+- broadcasts `task.updated`, `session.updated`, `agent.updated`, and `event.created` on in-memory mutations
+- emits periodic `health.updated` heartbeats
+- frontend applies websocket updates client-side so task board, office cards, event feed, and infra status refresh without a page reload
+
+This is still mock/in-memory state, but it preserves the intended architecture for later runtime adapters and a Postgres repository.
+
+## PostgreSQL status
+Postgres is now documented and bootstrapped at a first-pass level:
+- `apps/api/db/migrations/0001_init.sql` — initial schema
+- `apps/api/db/seed/0001_mock_seed.sql` — seed aligned with the current mock data
+- `apps/api/db/README.md` — local setup instructions
+
+The API does **not** persist to Postgres yet. That is the next repository-layer step, not part of this pass.
 
 ## Notes on the current implementation
 - data is still mocked/in-memory on the API side
-- the web app is now a real Next.js app-router frontend fetching overview, rooms, agents, tasks, and events from the API
-- the frontend also includes a small websocket client for realtime connection status
-- websocket support is still only a shell on the backend side
-- route validation schemas are now wired into Fastify for the mutation endpoints and ID-based routes
+- the web app is a real Next.js app-router frontend fetching overview, rooms, agents, tasks, and events from the API
+- the frontend now keeps a live local dashboard state hydrated by websocket snapshots + mutation events
+- websocket support now includes snapshot resync and mutation-driven broadcasts
+- route validation schemas are wired into Fastify for the mutation endpoints and ID-based routes
 
 ## Recommended next steps
-1. split Fastify routes into per-resource modules
-2. connect the web app to the API instead of local mock data
-3. replace mock repositories with Postgres-backed persistence
-4. wire the backend to real OpenClaw runtime state
-5. add command surfaces and live refresh around websocket events
+1. introduce a repository adapter boundary so the API can swap mock storage for Postgres cleanly
+2. persist mutation-generated events and audit records in the database-backed repository
+3. replace mock health/runtime values with real OpenClaw gateway + runtime sync state
+4. split frontend sections into focused route-level pages and add command surfaces
+5. add reconnect backoff and stale-data indicators in the dashboard UI

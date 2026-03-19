@@ -1,4 +1,4 @@
-import type { Agent, Event, Session, Task } from './domain'
+import type { AgentCard, Event, OverviewResponse, Room, Session, Task } from './domain'
 
 export type WsEnvelope<T = unknown> = {
   type: string
@@ -11,11 +11,19 @@ export type ConnectionHelloPayload = {
   serverTime: string
 }
 
-export type AgentUpdatedPayload = {
-  agent: Agent
-  currentSession?: Session | null
-  currentTask?: Task | null
+export type DashboardSnapshotPayload = {
+  overview: OverviewResponse
+  agents: AgentCard[]
+  tasks: Task[]
+  sessions: Session[]
+  events: Event[]
+  rooms: {
+    rooms: Room[]
+    placements: import('./domain').Placement[]
+  }
 }
+
+export type AgentUpdatedPayload = AgentCard
 
 export type SessionUpdatedPayload = {
   session: Session
@@ -38,6 +46,7 @@ export type HealthUpdatedPayload = {
 
 export type MissionControlWsEvent =
   | WsEnvelope<ConnectionHelloPayload>
+  | WsEnvelope<DashboardSnapshotPayload>
   | WsEnvelope<AgentUpdatedPayload>
   | WsEnvelope<SessionUpdatedPayload>
   | WsEnvelope<TaskUpdatedPayload>

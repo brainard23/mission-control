@@ -10,7 +10,9 @@
     "build": "npm run -ws build",
     "dev:web": "npm --workspace @mission-control/web run dev",
     "dev:api": "npm --workspace @mission-control/api run dev",
-    "typecheck": "npm run -ws typecheck"
+    "typecheck": "npm run -ws typecheck",
+    "db:migrate": "sh -c 'test -n \"$DATABASE_URL\" || { echo \"DATABASE_URL is required\"; exit 1; }; psql \"$DATABASE_URL\" -f apps/api/db/migrations/0001_init.sql'",
+    "db:seed": "sh -c 'test -n \"$DATABASE_URL\" || { echo \"DATABASE_URL is required\"; exit 1; }; psql \"$DATABASE_URL\" -f apps/api/db/seed/0001_mock_seed.sql'"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

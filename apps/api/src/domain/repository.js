@@ -8,12 +8,26 @@ export function getAgent(id) {
   return agents.find((agent) => agent.id === id) || null
 }
 
+export function updateAgent(id, patch) {
+  const agent = getAgent(id)
+  if (!agent) return null
+  Object.assign(agent, patch)
+  return agent
+}
+
 export function listSessions() {
   return sessions
 }
 
 export function getSession(id) {
   return sessions.find((session) => session.id === id) || null
+}
+
+export function updateSession(id, patch) {
+  const session = getSession(id)
+  if (!session) return null
+  Object.assign(session, patch)
+  return session
 }
 
 export function listTasks() {
@@ -49,6 +63,24 @@ export function listEvents() {
   return events
 }
 
+export function appendEvent(input) {
+  const event = {
+    id: `evt_${Date.now()}_${events.length + 1}`,
+    ts: input.ts || new Date().toISOString(),
+    kind: input.kind,
+    severity: input.severity || 'info',
+    message: input.message,
+    agentId: input.agentId || null,
+    sessionId: input.sessionId || null,
+    taskId: input.taskId || null,
+    metadata: input.metadata || undefined,
+  }
+
+  events.unshift(event)
+  if (events.length > 50) events.length = 50
+  return event
+}
+
 export function getEventsFor(filter) {
   return events.filter((event) => Object.entries(filter).every(([key, value]) => event[key] === value))
 }
@@ -63,4 +95,14 @@ export function listPlacements() {
 
 export function getTaskHistory(taskId) {
   return taskHistory[taskId] || []
+}
+
+export function appendTaskHistory(taskId, entry) {
+  if (!taskHistory[taskId]) taskHistory[taskId] = []
+  taskHistory[taskId].unshift({
+    id: `hist_${Date.now()}_${taskHistory[taskId].length + 1}`,
+    createdAt: new Date().toISOString(),
+    ...entry,
+  })
+  return taskHistory[taskId][0]
 }

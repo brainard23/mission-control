@@ -53,7 +53,7 @@ export function getOverview() {
       backendStatus: 'healthy',
       gatewayStatus: 'unknown',
       nodesOnline: 0,
-      websocketReady: false,
+      websocketReady: true,
       lastSyncAt: new Date().toISOString(),
     },
     recentEvents: events,
@@ -69,7 +69,7 @@ export function getHealth() {
       lastSyncAt: new Date().toISOString(),
       adapterFailures: 0,
     },
-    websocketReady: false,
+    websocketReady: true,
   }
 }
 
@@ -134,6 +134,17 @@ export function getRoomsView() {
   return {
     rooms: listRooms(),
     placements: listPlacements(),
+  }
+}
+
+export function getDashboardSnapshot() {
+  return {
+    overview: getOverview(),
+    agents: getAgentsView(),
+    tasks: getTasksView(),
+    sessions: getSessionsView(),
+    events: getEventsView(),
+    rooms: getRoomsView(),
   }
 }
 
