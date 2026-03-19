@@ -1,20 +1,12 @@
-# Web App Scaffold
+# Web App Legacy Notes
 
-This frontend is now a mock-data HTML MVP shell rendered from Node.
+The old lightweight Node-rendered HTML shell still lives in `src/` as reference material while the active app now runs from the Next.js app-router structure in `app/`.
 
-## Current behavior
-- serves a designed Mission Control dashboard at `/`
-- includes Overview stats, Office View, Sessions summary, Task Board, and Recent Events
-- uses mock data shaped from the shared contracts
+## Active frontend
+- `app/` contains the real Next.js entrypoints and page structure
+- `lib/mock-overview.ts` holds the mocked Mission Control data flow
+- `app/globals.css` preserves the dashboard + office aesthetic in the new React app
 
-## Why it is still a scaffold
-- it is not yet a real Next.js app
-- no client-side routing yet
-- no TanStack Query or websocket client yet
-- no live OpenClaw data yet
-
-## Next implementation steps
-- replace the Node HTML renderer with a real Next.js app router project
-- split the shell into reusable components
-- fetch from the API layer instead of local mock data
-- add websocket updates and real Office interactions
+## Why the legacy shell remains
+- it preserves the original mock shell implementation for comparison during the transition
+- it can be deleted once the Next.js app fully replaces it in a follow-up cleanup

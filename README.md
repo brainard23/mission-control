@@ -9,7 +9,7 @@ It combines:
 ## Current status
 This repository currently contains a **mock MVP skeleton**:
 - Fastify-based backend scaffold in `apps/api`
-- rendered frontend shell in `apps/web`
+- Next.js frontend shell in `apps/web`
 - shared contracts in `packages/contracts`
 - planning and design artifacts in `mission-control/`
 
@@ -25,7 +25,7 @@ It is not production-ready yet, but it is structured to evolve into:
 ```text
 apps/
   api/          # backend scaffold + mock data routes + websocket shell
-  web/          # frontend shell + mock dashboard renderer
+  web/          # Next.js app-router frontend shell + mock dashboard renderer
 packages/
   contracts/    # shared domain/API/websocket contracts
 mission-control/
@@ -60,13 +60,13 @@ npm run dev:api
 This starts the backend on:
 - `http://localhost:4000`
 
-### 4. Run the web shell
+### 4. Run the web app
 In a second terminal:
 ```bash
 npm run dev:web
 ```
 
-This starts the mock frontend shell on:
+This starts the Next.js frontend on:
 - `http://localhost:3000`
 
 ## Local scripts
@@ -115,13 +115,13 @@ npm --workspace @mission-control/web run typecheck
 
 ## Notes on the current implementation
 - data is still mocked/in-memory
-- the web app is still a rendered Node shell, not Next.js yet
+- the web app is now a real Next.js app-router frontend using local mock data
 - websocket support is only a shell for now
 - route validation schemas are now wired into Fastify for the mutation endpoints and ID-based routes
 
 ## Recommended next steps
 1. split Fastify routes into per-resource modules
-2. replace the rendered Node web shell with a real Next.js app
-3. connect the web app to the API instead of local mock data
-4. replace mock repositories with Postgres-backed persistence
-5. wire the backend to real OpenClaw runtime state
+2. connect the web app to the API instead of local mock data
+3. replace mock repositories with Postgres-backed persistence
+4. wire the backend to real OpenClaw runtime state
+5. add command surfaces and live refresh around websocket events

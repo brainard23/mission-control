@@ -17,9 +17,12 @@ skills/
 
 # Node / build
 node_modules/
+.pnpm-store/
+.next/
 dist/
 .tmp/
 coverage/
+*.tsbuildinfo
 *.log
 
 # Env
