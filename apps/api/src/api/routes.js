@@ -12,6 +12,7 @@ import {
   getTaskView,
   getTasksView,
 } from '../domain/services.js'
+import { assignTask, retryTask, sendSessionMessage, stopSession, updateTask } from '../domain/commands.js'
 
 export function registerRoutes(app) {
   app.get('/health', (_req, res) => {
@@ -67,5 +68,35 @@ export function registerRoutes(app) {
   app.post('/api/v1/tasks', (req, res) => {
     const task = createTaskView(req.body || {})
     json(res, 201, { data: { task } })
+  })
+
+  app.patch('/api/v1/tasks/:id', (req, res) => {
+    const task = updateTask(req.params.id, req.body || {})
+    if (!task) return json(res, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${req.params.id} was not found` } })
+    json(res, 200, { data: { task } })
+  })
+
+  app.post('/api/v1/tasks/:id/assign', (req, res) => {
+    const task = assignTask(req.params.id, req.body?.agentId)
+    if (!task) return json(res, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${req.params.id} was not found` } })
+    json(res, 200, { data: { task } })
+  })
+
+  app.post('/api/v1/tasks/:id/retry', (req, res) => {
+    const task = retryTask(req.params.id, req.body?.reason)
+    if (!task) return json(res, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${req.params.id} was not found` } })
+    json(res, 200, { data: { task } })
+  })
+
+  app.post('/api/v1/sessions/:id/message', (req, res) => {
+    const result = sendSessionMessage(req.params.id, req.body?.message)
+    if (!result) return json(res, 404, { error: { code: 'SESSION_NOT_FOUND', message: `Session ${req.params.id} was not found` } })
+    json(res, 202, { data: result })
+  })
+
+  app.post('/api/v1/sessions/:id/stop', (req, res) => {
+    const result = stopSession(req.params.id, req.body?.reason)
+    if (!result) return json(res, 404, { error: { code: 'SESSION_NOT_FOUND', message: `Session ${req.params.id} was not found` } })
+    json(res, 202, { data: result })
   })
 }

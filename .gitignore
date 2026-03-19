@@ -1,0 +1,27 @@
+# Workspace/private assistant files
+.DS_Store
+.clawhub/
+.openclaw/
+AGENTS.md
+BOOTSTRAP.md
+CONTEXT.md
+HEARTBEAT.md
+SOUL.md
+STANDARD.md
+TOOLS.md
+USER.md
+WORKFLOW.md
+MEMORY.md
+memory/
+skills/
+
+# Node / build
+node_modules/
+dist/
+.tmp/
+coverage/
+*.log
+
+# Env
+.env
+.env.*
