@@ -1,6 +1,14 @@
 # API App Scaffold
 
-This backend is now a mock-data MVP skeleton.
+This backend is now organized like a lightweight Fastify-style app, but without external dependencies yet.
+
+## Current structure
+- `src/server.js` — server bootstrap
+- `src/lib/http.js` — tiny routing/http layer
+- `src/api/routes.js` — route registration
+- `src/domain/repository.js` — mock data access
+- `src/domain/services.js` — view composition and business logic
+- `src/mock-data.js` — in-memory seed data
 
 ## Current routes
 - `GET /health`
@@ -17,8 +25,8 @@ This backend is now a mock-data MVP skeleton.
 - `POST /api/v1/tasks`
 
 ## Next implementation steps
-- replace the HTTP server with Fastify
-- move mock data into services/repositories
+- swap `src/lib/http.js` for real Fastify
+- split routes into per-resource modules
+- add validation schemas
 - add websocket support
-- add real OpenClaw adapters
-- add persistence with Postgres and migrations
+- add real OpenClaw adapters and Postgres persistence
