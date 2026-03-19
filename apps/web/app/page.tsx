@@ -12,6 +12,7 @@ export default async function HomePage() {
       events={data.events}
       rooms={data.rooms}
       websocketUrl={getWebsocketUrl(data.apiBaseUrl)}
+      apiBaseUrl={data.apiBaseUrl}
     />
   )
 }

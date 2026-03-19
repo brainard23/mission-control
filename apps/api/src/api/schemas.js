@@ -68,3 +68,20 @@ export const sessionStopBodySchema = {
     reason: { type: 'string' },
   },
 }
+
+export const chatMessageBodySchema = {
+  type: 'object',
+  required: ['message'],
+  properties: {
+    message: { type: 'string', minLength: 1, maxLength: 4000 },
+    sessionId: { type: 'string' },
+  },
+}
+
+export const agentIdParamSchema = {
+  type: 'object',
+  required: ['agentId'],
+  properties: {
+    agentId: { type: 'string', minLength: 1 },
+  },
+}

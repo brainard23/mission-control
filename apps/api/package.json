@@ -4,13 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/server.js",
+    "dev": "node --env-file=../../.env --watch src/server.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fastify/cors": "^10.0.2",
     "@fastify/websocket": "^11.0.1",
     "@mission-control/contracts": "0.1.0",
-    "fastify": "^5.2.1"
+    "fastify": "^5.2.1",
+    "pg": "^8.13.1"
   }
 }

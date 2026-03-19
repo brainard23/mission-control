@@ -2,14 +2,18 @@ import { createApp } from './lib/http.js'
 import { registerRoutes } from './api/routes.js'
 import { registerRealtime } from './realtime/ws.js'
 import { refreshRuntimeSnapshot, startRuntimeSync } from './integrations.openclaw-runtime.js'
+import { initDb } from './db.js'
 
 const port = Number(process.env.PORT || 4000)
 const host = process.env.HOST || '0.0.0.0'
 const app = await createApp()
 
+await initDb()
 registerRoutes(app)
 registerRealtime(app)
-await refreshRuntimeSnapshot()
+
+// Start runtime sync in background — don't block server startup
+refreshRuntimeSnapshot().catch(() => {})
 startRuntimeSync()
 
 app.listen({ port, host }).then(() => {

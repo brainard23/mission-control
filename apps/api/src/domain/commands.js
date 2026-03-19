@@ -7,6 +7,7 @@ import {
   getTask,
   updateAgent,
   updateSession,
+  updateTask as repoUpdateTask,
 } from './repository.js'
 import { buildAgentCard, getDashboardSnapshot, getHealth } from './services.js'
 import { publishRealtime } from '../realtime/hub.js'
@@ -29,29 +30,29 @@ function emitHealth() {
   })
 }
 
-function emitTaskAndRelated(task) {
+async function emitTaskAndRelated(task) {
   emit('task.updated', { task })
 
   if (task.assignedAgentId) {
-    const agent = getAgent(task.assignedAgentId)
+    const agent = await getAgent(task.assignedAgentId)
     if (agent) {
-      emit('agent.updated', buildAgentCard(agent))
+      emit('agent.updated', await buildAgentCard(agent))
     }
   }
 
   if (task.sessionId) {
-    const session = getSession(task.sessionId)
+    const session = await getSession(task.sessionId)
     if (session) {
       emit('session.updated', { session })
     }
   }
 
-  emit('overview.snapshot', getDashboardSnapshot())
+  emit('overview.snapshot', await getDashboardSnapshot())
   emitHealth()
 }
 
-function recordTaskMutation(task, details) {
-  const event = appendEvent({
+async function recordTaskMutation(task, details) {
+  const event = await appendEvent({
     kind: details.kind,
     severity: details.severity,
     message: details.message,
@@ -61,7 +62,7 @@ function recordTaskMutation(task, details) {
     metadata: details.metadata,
   })
 
-  appendTaskHistory(task.id, {
+  await appendTaskHistory(task.id, {
     fromStatus: details.fromStatus,
     toStatus: task.status,
     message: details.message,
@@ -73,34 +74,38 @@ function recordTaskMutation(task, details) {
   emit('event.created', { event })
 }
 
-export function createTaskView(input) {
-  const task = createTask(input)
-  recordTaskMutation(task, {
+export async function createTaskView(input) {
+  const task = await createTask(input)
+  await recordTaskMutation(task, {
     kind: 'task.created',
     severity: 'info',
     message: `Created task ${task.title}`,
     toStatus: task.status,
   })
-  emitTaskAndRelated(task)
+  await emitTaskAndRelated(task)
   return task
 }
 
-export function updateTask(id, patch) {
-  const task = getTask(id)
+export async function updateTask(id, patch) {
+  const existing = await getTask(id)
+  if (!existing) return null
+
+  const previousStatus = existing.status
+
+  const updatePatch = {}
+  if (typeof patch.title === 'string') updatePatch.title = patch.title
+  if (patch.description !== undefined) updatePatch.description = patch.description
+  if (patch.status) updatePatch.status = patch.status
+  if (patch.priority) updatePatch.priority = patch.priority
+  if (patch.blockerReason !== undefined) updatePatch.blockerReason = patch.blockerReason
+  if (Array.isArray(patch.tags)) updatePatch.tags = patch.tags
+  if (patch.metadata) updatePatch.metadata = { ...(existing.metadata || {}), ...patch.metadata }
+  if (updatePatch.status === 'done') updatePatch.completedAt = new Date().toISOString()
+
+  const task = await repoUpdateTask(id, updatePatch)
   if (!task) return null
 
-  const previousStatus = task.status
-  if (typeof patch.title === 'string') task.title = patch.title
-  if (patch.description !== undefined) task.description = patch.description
-  if (patch.status) task.status = patch.status
-  if (patch.priority) task.priority = patch.priority
-  if (patch.blockerReason !== undefined) task.blockerReason = patch.blockerReason
-  if (Array.isArray(patch.tags)) task.tags = patch.tags
-  if (patch.metadata) task.metadata = { ...(task.metadata || {}), ...patch.metadata }
-  task.updatedAt = new Date().toISOString()
-  if (task.status === 'done') task.completedAt = task.updatedAt
-
-  recordTaskMutation(task, {
+  await recordTaskMutation(task, {
     kind: task.status === 'blocked' ? 'task.blocked' : 'task.updated',
     severity: task.status === 'blocked' ? 'warning' : 'info',
     message: task.status === 'blocked'
@@ -109,27 +114,29 @@ export function updateTask(id, patch) {
     fromStatus: previousStatus,
   })
 
-  emitTaskAndRelated(task)
+  await emitTaskAndRelated(task)
   return task
 }
 
-export function assignTask(taskId, agentId) {
-  const task = getTask(taskId)
+export async function assignTask(taskId, agentId) {
+  const existing = await getTask(taskId)
+  if (!existing) return null
+
+  const previousStatus = existing.status
+  const agent = agentId ? await getAgent(agentId) : null
+
+  const task = await repoUpdateTask(taskId, { assignedAgentId: agentId })
   if (!task) return null
 
-  const previousStatus = task.status
-  const agent = agentId ? getAgent(agentId) : null
-  task.assignedAgentId = agentId
-  task.updatedAt = new Date().toISOString()
   if (agent) {
-    updateAgent(agent.id, {
+    await updateAgent(agent.id, {
       currentTaskId: task.id,
       status: task.status === 'blocked' ? 'blocked' : 'working',
-      lastActivityAt: task.updatedAt,
+      lastActivityAt: new Date().toISOString(),
     })
   }
 
-  recordTaskMutation(task, {
+  await recordTaskMutation(task, {
     kind: 'task.assigned',
     severity: 'info',
     message: agent ? `${task.title} assigned to ${agent.name}` : `${task.title} assignment cleared`,
@@ -138,20 +145,23 @@ export function assignTask(taskId, agentId) {
     metadata: { agentId: agentId || null },
   })
 
-  emitTaskAndRelated(task)
+  await emitTaskAndRelated(task)
   return task
 }
 
-export function retryTask(taskId, reason) {
-  const task = getTask(taskId)
-  if (!task) return null
-  const previousStatus = task.status
-  task.status = 'queued'
-  task.blockerReason = null
-  task.updatedAt = new Date().toISOString()
-  task.metadata = { ...(task.metadata || {}), retryReason: reason || null }
+export async function retryTask(taskId, reason) {
+  const existing = await getTask(taskId)
+  if (!existing) return null
+  const previousStatus = existing.status
 
-  recordTaskMutation(task, {
+  const task = await repoUpdateTask(taskId, {
+    status: 'queued',
+    blockerReason: null,
+    metadata: { ...(existing.metadata || {}), retryReason: reason || null },
+  })
+  if (!task) return null
+
+  await recordTaskMutation(task, {
     kind: 'task.retried',
     severity: 'info',
     message: reason ? `${task.title} queued again: ${reason}` : `${task.title} queued again`,
@@ -159,15 +169,15 @@ export function retryTask(taskId, reason) {
     metadata: { retryReason: reason || null },
   })
 
-  emitTaskAndRelated(task)
+  await emitTaskAndRelated(task)
   return task
 }
 
-export function sendSessionMessage(sessionId, message) {
-  const session = getSession(sessionId)
+export async function sendSessionMessage(sessionId, message) {
+  const session = await getSession(sessionId)
   if (!session) return null
 
-  const event = appendEvent({
+  const event = await appendEvent({
     kind: 'session.message_requested',
     severity: 'info',
     message: `Queued operator message for ${session.label || session.id}`,
@@ -178,7 +188,7 @@ export function sendSessionMessage(sessionId, message) {
 
   emit('event.created', { event })
   emit('session.updated', { session })
-  emit('overview.snapshot', getDashboardSnapshot())
+  emit('overview.snapshot', await getDashboardSnapshot())
   emitHealth()
 
   return {
@@ -189,23 +199,23 @@ export function sendSessionMessage(sessionId, message) {
   }
 }
 
-export function stopSession(sessionId, reason) {
-  const session = getSession(sessionId)
+export async function stopSession(sessionId, reason) {
+  const session = await getSession(sessionId)
   if (!session) return null
   const now = new Date().toISOString()
-  updateSession(sessionId, {
+
+  await updateSession(sessionId, {
     state: 'paused',
     lastActivityAt: now,
     metadata: { ...(session.metadata || {}), stopReason: reason || null },
   })
 
-  const task = session.currentTaskId ? getTask(session.currentTaskId) : null
+  const task = session.currentTaskId ? await getTask(session.currentTaskId) : null
   if (task) {
-    task.status = 'waiting'
-    task.updatedAt = now
+    await repoUpdateTask(task.id, { status: 'waiting' })
   }
 
-  const event = appendEvent({
+  const event = await appendEvent({
     kind: 'session.stop_requested',
     severity: 'warning',
     message: reason ? `${session.label || session.id} pause requested: ${reason}` : `${session.label || session.id} pause requested`,
@@ -215,15 +225,20 @@ export function stopSession(sessionId, reason) {
     metadata: { reason: reason || null },
   })
 
+  const updatedSession = await getSession(sessionId)
+  const updatedTask = task ? await getTask(task.id) : null
+
   emit('event.created', { event })
-  emit('session.updated', { session })
-  if (task) emit('task.updated', { task })
-  const agent = getAgent(session.agentId)
+  emit('session.updated', { session: updatedSession || session })
+  if (updatedTask) emit('task.updated', { task: updatedTask })
+
+  const agent = await getAgent(session.agentId)
   if (agent) {
-    updateAgent(agent.id, { status: 'waiting', lastActivityAt: now })
-    emit('agent.updated', buildAgentCard(agent))
+    await updateAgent(agent.id, { status: 'waiting', lastActivityAt: now })
+    emit('agent.updated', await buildAgentCard(agent))
   }
-  emit('overview.snapshot', getDashboardSnapshot())
+
+  emit('overview.snapshot', await getDashboardSnapshot())
   emitHealth()
 
   return {

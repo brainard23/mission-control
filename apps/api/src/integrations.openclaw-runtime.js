@@ -218,7 +218,7 @@ export function diffRuntimeSnapshots(previousSnapshot, nextSnapshot) {
   }
 }
 
-function publishRuntimeRefresh(previousSnapshot, nextSnapshot) {
+async function publishRuntimeRefresh(previousSnapshot, nextSnapshot) {
   const diff = diffRuntimeSnapshots(previousSnapshot, nextSnapshot)
   if (!diff.hasPresenceChanges && !diff.healthChanged) return
 
@@ -227,7 +227,7 @@ function publishRuntimeRefresh(previousSnapshot, nextSnapshot) {
   const nextSessions = indexById(nextSnapshot.sessions || [])
 
   for (const agentId of changedAgentIds) {
-    const agentCard = buildAgentCard(nextSnapshot.agents.find((agent) => agent.id === agentId))
+    const agentCard = await buildAgentCard(nextSnapshot.agents.find((agent) => agent.id === agentId))
     emit('agent.updated', agentCard)
   }
 
@@ -237,14 +237,16 @@ function publishRuntimeRefresh(previousSnapshot, nextSnapshot) {
     emit('session.updated', { session })
   }
 
-  emit('overview.snapshot', getDashboardSnapshot())
+  emit('overview.snapshot', await getDashboardSnapshot())
   emitHealth()
 }
 
+const OPENCLAW_CONTAINER = process.env.OPENCLAW_CONTAINER || 'openclaw-openclaw-gateway-1'
+
 async function runOpenClawJson(args) {
-  const { stdout } = await execFileAsync('openclaw', args, {
+  const { stdout } = await execFileAsync('docker', ['exec', OPENCLAW_CONTAINER, 'openclaw', ...args], {
     cwd: process.cwd(),
-    timeout: 10000,
+    timeout: 15000,
     maxBuffer: 1024 * 1024,
     env: process.env,
   })
@@ -323,7 +325,7 @@ export async function refreshRuntimeSnapshot() {
 
   state.sync.lastAttemptAt = new Date().toISOString()
   state.refreshing = fetchRuntimeSnapshot()
-    .then((snapshot) => {
+    .then(async (snapshot) => {
       const previousSnapshot = state.snapshot
       state.snapshot = {
         agents: snapshot.agents,
@@ -335,7 +337,7 @@ export async function refreshRuntimeSnapshot() {
       state.sync.lastSyncAt = snapshot.lastSyncAt
       state.sync.failureCount = 0
       state.sync.lastError = null
-      publishRuntimeRefresh(previousSnapshot, state.snapshot)
+      await publishRuntimeRefresh(previousSnapshot, state.snapshot)
       return getRuntimeSnapshot()
     })
     .catch((error) => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentCard,
   Event,
@@ -12,6 +12,14 @@ import type {
   Task,
 } from '@mission-control/contracts'
 import { RealtimeStatus } from './realtime-status'
+import { ChatDrawer } from './chat-drawer'
+import {
+  createTask as apiCreateTask,
+  updateTaskStatus as apiUpdateTask,
+  retryTask as apiRetryTask,
+  sendSessionMessage as apiSendMessage,
+  stopSession as apiStopSession,
+} from '../lib/api'
 
 type DashboardProps = {
   overview: OverviewResponse
@@ -20,11 +28,21 @@ type DashboardProps = {
   events: Event[]
   rooms: Room[]
   websocketUrl: string
+  apiBaseUrl: string
 }
 
-type DashboardState = Omit<DashboardProps, 'websocketUrl'> & {
+type DashboardState = Omit<DashboardProps, 'websocketUrl' | 'apiBaseUrl'> & {
   sessions: Session[]
 }
+
+const NAV_SECTIONS = [
+  { label: 'Overview', id: 'section-overview' },
+  { label: 'Office', id: 'section-office' },
+  { label: 'Sessions', id: 'section-sessions' },
+  { label: 'Tasks', id: 'section-tasks' },
+  { label: 'Events', id: 'section-events' },
+  { label: 'Infra', id: 'section-infra' },
+] as const
 
 const statusTone: Record<string, string> = {
   idle: 'var(--status-idle)',
@@ -127,7 +145,7 @@ function RoomSection({ room, cards }: { room: Room; cards: AgentCard[] }) {
   )
 }
 
-function TaskColumn({ title, items }: { title: string; items: Task[] }) {
+function TaskColumn({ title, items, onRetry, onMarkDone }: { title: string; items: Task[]; onRetry: (id: string) => void; onMarkDone: (id: string) => void }) {
   return (
     <section className="task-column panel panel--soft">
       <div className="section-head compact">
@@ -146,6 +164,14 @@ function TaskColumn({ title, items }: { title: string; items: Task[] }) {
                 <span className="priority-dot" style={{ ['--priority' as string]: priorityTone[task.priority] ?? 'var(--priority-normal)' }} />
                 <span>{task.priority}</span>
                 <span>{task.status}</span>
+              </div>
+              <div className="task-item__actions">
+                {(task.status === 'blocked' || task.status === 'failed') && (
+                  <button className="action-btn" onClick={() => onRetry(task.id)}>Retry</button>
+                )}
+                {task.status !== 'done' && (
+                  <button className="action-btn" onClick={() => onMarkDone(task.id)}>Mark Done</button>
+                )}
               </div>
             </article>
           ))
@@ -171,7 +197,7 @@ function EventFeed({ items }: { items: Event[] }) {
   )
 }
 
-function SessionList({ cards }: { cards: AgentCard[] }) {
+function SessionList({ cards, onMessage, onStop }: { cards: AgentCard[]; onMessage: (id: string) => void; onStop: (id: string) => void }) {
   const activeCards = cards.filter((card) => card.currentSession)
 
   return (
@@ -188,12 +214,60 @@ function SessionList({ cards }: { cards: AgentCard[] }) {
               <span>{card.currentSession?.model ?? 'default'}</span>
               <span>{card.currentSession?.state}</span>
             </div>
+            <div className="session-item__actions">
+              <button className="action-btn" onClick={() => onMessage(card.currentSession!.id)}>Message</button>
+              <button className="action-btn action-btn--warn" onClick={() => onStop(card.currentSession!.id)}>Stop</button>
+            </div>
           </article>
         ))
       ) : (
         <p className="muted">No active sessions.</p>
       )}
     </div>
+  )
+}
+
+function CreateTaskForm({ onSubmit, onCancel }: { onSubmit: (input: { title: string; description?: string; priority?: string }) => void; onCancel: () => void }) {
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [priority, setPriority] = useState('normal')
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!title.trim()) return
+    onSubmit({ title: title.trim(), description: description.trim() || undefined, priority })
+    setTitle('')
+    setDescription('')
+    setPriority('normal')
+  }
+
+  return (
+    <form className="create-task-form" onSubmit={handleSubmit}>
+      <input
+        type="text"
+        placeholder="Task title"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        required
+        autoFocus
+      />
+      <textarea
+        placeholder="Description (optional)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        rows={2}
+      />
+      <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+        <option value="low">Low</option>
+        <option value="normal">Normal</option>
+        <option value="high">High</option>
+        <option value="urgent">Urgent</option>
+      </select>
+      <div className="create-task-form__actions">
+        <button type="submit" className="action-btn action-btn--primary">Create</button>
+        <button type="button" className="action-btn" onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
   )
 }
 
@@ -207,7 +281,12 @@ export function DashboardLive(props: DashboardProps) {
     sessions: props.agentCards.map((card) => card.currentSession).filter(Boolean) as Session[],
   })
   const [lastMessageAt, setLastMessageAt] = useState<string | null>(props.overview.health.lastSyncAt ?? null)
-
+  const [activeSection, setActiveSection] = useState('section-overview')
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const observerRef = useRef<IntersectionObserver | null>(null)
+  console.log(state, 'here')
+  // WebSocket connection
   useEffect(() => {
     let closedByEffect = false
     const socket = new WebSocket(props.websocketUrl)
@@ -302,6 +381,76 @@ export function DashboardLive(props: DashboardProps) {
     }
   }, [props.websocketUrl])
 
+  // IntersectionObserver for active nav section
+  useEffect(() => {
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveSection(entry.target.id)
+          }
+        }
+      },
+      { rootMargin: '-20% 0px -60% 0px', threshold: 0 }
+    )
+
+    for (const section of NAV_SECTIONS) {
+      const el = document.getElementById(section.id)
+      if (el) observerRef.current.observe(el)
+    }
+
+    return () => observerRef.current?.disconnect()
+  }, [])
+
+  const scrollTo = useCallback((id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  // Action handlers
+  const handleRetryTask = useCallback(async (taskId: string) => {
+    try {
+      await apiRetryTask(props.apiBaseUrl, taskId)
+    } catch (err) {
+      console.error('Failed to retry task:', err)
+    }
+  }, [props.apiBaseUrl])
+
+  const handleMarkDone = useCallback(async (taskId: string) => {
+    try {
+      await apiUpdateTask(props.apiBaseUrl, taskId, { status: 'done' })
+    } catch (err) {
+      console.error('Failed to mark task done:', err)
+    }
+  }, [props.apiBaseUrl])
+
+  const handleSendMessage = useCallback(async (sessionId: string) => {
+    const message = window.prompt('Message to send:')
+    if (!message) return
+    try {
+      await apiSendMessage(props.apiBaseUrl, sessionId, message)
+    } catch (err) {
+      console.error('Failed to send message:', err)
+    }
+  }, [props.apiBaseUrl])
+
+  const handleStopSession = useCallback(async (sessionId: string) => {
+    if (!window.confirm('Stop this session?')) return
+    try {
+      await apiStopSession(props.apiBaseUrl, sessionId)
+    } catch (err) {
+      console.error('Failed to stop session:', err)
+    }
+  }, [props.apiBaseUrl])
+
+  const handleCreateTask = useCallback(async (input: { title: string; description?: string; priority?: string }) => {
+    try {
+      await apiCreateTask(props.apiBaseUrl, input)
+      setShowCreateForm(false)
+    } catch (err) {
+      console.error('Failed to create task:', err)
+    }
+  }, [props.apiBaseUrl])
+
   const queued = useMemo(() => state.tasks.filter((task) => task.status === 'queued'), [state.tasks])
   const inProgress = useMemo(() => state.tasks.filter((task) => task.status === 'in_progress'), [state.tasks])
   const blocked = useMemo(() => state.tasks.filter((task) => task.status === 'blocked' || task.status === 'waiting'), [state.tasks])
@@ -315,15 +464,22 @@ export function DashboardLive(props: DashboardProps) {
           <p>Overview, Office, Sessions, Tasks, Events, and infra health in one live room.</p>
         </div>
         <nav className="topbar__nav" aria-label="Primary navigation">
-          {['Overview', 'Office', 'Sessions', 'Tasks', 'Events', 'Infra'].map((item) => (
-            <span key={item} className="pill">
-              {item}
-            </span>
+          {NAV_SECTIONS.map((item) => (
+            <button
+              key={item.id}
+              className={`pill${activeSection === item.id ? ' pill--active' : ''}`}
+              onClick={() => scrollTo(item.id)}
+            >
+              {item.label}
+            </button>
           ))}
+          <button className="pill pill--chat" onClick={() => setChatOpen(true)}>
+            Chat
+          </button>
         </nav>
       </header>
 
-      <section className="stats-grid">
+      <section id="section-overview" className="stats-grid">
         <StatCard label="Active agents" value={state.overview.stats.activeAgents} detail="Agents currently visible in the office." />
         <StatCard label="Active sessions" value={state.overview.stats.activeSessions} detail="Running contexts across main, subagent, and ACP flows." />
         <StatCard label="Queued tasks" value={state.overview.stats.queuedTasks} detail="Work ready for assignment." />
@@ -333,7 +489,7 @@ export function DashboardLive(props: DashboardProps) {
       </section>
 
       <section className="hero-grid">
-        <section className="panel overview-panel">
+        <section id="section-office" className="panel overview-panel">
           <div className="section-head">
             <div>
               <span className="eyebrow">Mission status</span>
@@ -374,7 +530,7 @@ export function DashboardLive(props: DashboardProps) {
             </div>
           </section>
 
-          <section className="panel health-panel">
+          <section id="section-infra" className="panel health-panel">
             <div className="section-head compact">
               <h2>Infra health</h2>
               <span className="badge badge--ghost">ops</span>
@@ -399,7 +555,7 @@ export function DashboardLive(props: DashboardProps) {
             </dl>
           </section>
 
-          <section className="panel events-panel">
+          <section id="section-events" className="panel events-panel">
             <div className="section-head compact">
               <h2>Recent events</h2>
               <span className="badge badge--ghost">timeline</span>
@@ -410,7 +566,7 @@ export function DashboardLive(props: DashboardProps) {
       </section>
 
       <section className="bottom-grid">
-        <section className="panel">
+        <section id="section-sessions" className="panel">
           <div className="section-head compact">
             <div>
               <span className="eyebrow">Active contexts</span>
@@ -418,24 +574,31 @@ export function DashboardLive(props: DashboardProps) {
             </div>
             <span className="badge badge--ghost">runtime view</span>
           </div>
-          <SessionList cards={state.agentCards} />
+          <SessionList cards={state.agentCards} onMessage={handleSendMessage} onStop={handleStopSession} />
         </section>
 
-        <section className="panel">
+        <section id="section-tasks" className="panel">
           <div className="section-head compact">
             <div>
               <span className="eyebrow">Work in motion</span>
               <h2>Task board</h2>
             </div>
-            <span className="badge badge--ghost">kanban</span>
+            <button className="action-btn action-btn--primary" onClick={() => setShowCreateForm((v) => !v)}>
+              {showCreateForm ? 'Cancel' : 'New Task'}
+            </button>
           </div>
+          {showCreateForm && (
+            <CreateTaskForm onSubmit={handleCreateTask} onCancel={() => setShowCreateForm(false)} />
+          )}
           <div className="task-board">
-            <TaskColumn title="Queued" items={queued} />
-            <TaskColumn title="In progress" items={inProgress} />
-            <TaskColumn title="Blocked / Waiting" items={blocked} />
+            <TaskColumn title="Queued" items={queued} onRetry={handleRetryTask} onMarkDone={handleMarkDone} />
+            <TaskColumn title="In progress" items={inProgress} onRetry={handleRetryTask} onMarkDone={handleMarkDone} />
+            <TaskColumn title="Blocked / Waiting" items={blocked} onRetry={handleRetryTask} onMarkDone={handleMarkDone} />
           </div>
         </section>
       </section>
+
+      <ChatDrawer apiBaseUrl={props.apiBaseUrl} open={chatOpen} onClose={() => setChatOpen(false)} />
     </main>
   )
 }

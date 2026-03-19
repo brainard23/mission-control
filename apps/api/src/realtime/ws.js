@@ -9,7 +9,7 @@ function send(socket, message) {
 
 export function registerRealtime(app) {
   app.register(async function websocketRoutes(fastify) {
-    fastify.get('/ws/v1', { websocket: true }, (socket) => {
+    fastify.get('/ws/v1', { websocket: true }, async (socket) => {
       send(socket, {
         type: 'connection.hello',
         ts: new Date().toISOString(),
@@ -22,7 +22,7 @@ export function registerRealtime(app) {
       send(socket, {
         type: 'overview.snapshot',
         ts: new Date().toISOString(),
-        payload: getDashboardSnapshot(),
+        payload: await getDashboardSnapshot(),
       })
 
       const unsubscribe = subscribeRealtime((message) => {
