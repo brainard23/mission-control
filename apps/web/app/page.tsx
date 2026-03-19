@@ -1,5 +1,6 @@
 import type { AgentCard, Event, OverviewResponse, Room, Task } from '@mission-control/contracts'
-import { agentCards, events, overview, rooms, tasks } from '../lib/mock-overview'
+import { RealtimeStatus } from './realtime-status'
+import { getDashboardData, getWebsocketUrl } from '../lib/api'
 
 type DashboardProps = {
   overview: OverviewResponse
@@ -7,6 +8,7 @@ type DashboardProps = {
   tasks: Task[]
   events: Event[]
   rooms: Room[]
+  websocketUrl: string
 }
 
 const statusTone: Record<string, string> = {
@@ -88,9 +90,7 @@ function RoomSection({ room, cards }: { room: Room; cards: AgentCard[] }) {
         <span className="badge badge--ghost">{room.kind}</span>
       </div>
       <div className="agent-grid">
-        {cards.map((card) => (
-          <AgentDesk key={card.agent.id} card={card} />
-        ))}
+        {cards.length ? cards.map((card) => <AgentDesk key={card.agent.id} card={card} />) : <p className="muted">No agents placed in this room yet.</p>}
       </div>
     </section>
   )
@@ -129,7 +129,7 @@ function EventFeed({ items }: { items: Event[] }) {
   return (
     <div className="stack">
       {items.map((event) => (
-        <article key={event.id} className="event-row">
+        <article key={event.id} className="event-row" data-severity={event.severity}>
           <span className="eyebrow event-kind">{event.kind}</span>
           <p>{event.message}</p>
           <time>{formatUtc(event.ts)}</time>
@@ -144,18 +144,22 @@ function SessionList({ cards }: { cards: AgentCard[] }) {
 
   return (
     <div className="stack">
-      {activeCards.map((card) => (
-        <article key={card.currentSession?.id} className="session-item">
-          <div>
-            <strong>{card.currentSession?.label}</strong>
-            <p>{card.currentSession?.summary}</p>
-          </div>
-          <div className="session-item__meta">
-            <span>{card.currentSession?.runtime}</span>
-            <span>{card.currentSession?.model ?? 'default'}</span>
-          </div>
-        </article>
-      ))}
+      {activeCards.length ? (
+        activeCards.map((card) => (
+          <article key={card.currentSession?.id} className="session-item">
+            <div>
+              <strong>{card.currentSession?.label}</strong>
+              <p>{card.currentSession?.summary}</p>
+            </div>
+            <div className="session-item__meta">
+              <span>{card.currentSession?.runtime}</span>
+              <span>{card.currentSession?.model ?? 'default'}</span>
+            </div>
+          </article>
+        ))
+      ) : (
+        <p className="muted">No active sessions.</p>
+      )}
     </div>
   )
 }
@@ -202,12 +206,18 @@ function Dashboard(props: DashboardProps) {
           </div>
           <div className="room-stack">
             {props.rooms.map((room) => (
-              <RoomSection key={room.id} room={room} cards={props.agentCards.filter((card) => card.room?.id === room.id)} />
+              <RoomSection key={room.id} room={room} cards={props.agentCards.filter((card) => card.room?.id === room.id || card.agent.roomId === room.id)} />
             ))}
           </div>
         </section>
 
         <aside className="sidebar-stack">
+          <RealtimeStatus
+            websocketUrl={props.websocketUrl}
+            initialReady={props.overview.health.websocketReady}
+            initialLastSyncAt={props.overview.health.lastSyncAt}
+          />
+
           <section className="panel attention-panel">
             <div className="section-head compact">
               <h2>Attention needed</h2>
@@ -293,6 +303,17 @@ function Dashboard(props: DashboardProps) {
   )
 }
 
-export default function HomePage() {
-  return <Dashboard overview={overview} agentCards={agentCards} tasks={tasks} events={events} rooms={rooms} />
+export default async function HomePage() {
+  const data = await getDashboardData()
+
+  return (
+    <Dashboard
+      overview={data.overview}
+      agentCards={data.agentCards}
+      tasks={data.tasks}
+      events={data.events}
+      rooms={data.rooms}
+      websocketUrl={getWebsocketUrl(data.apiBaseUrl)}
+    />
+  )
 }

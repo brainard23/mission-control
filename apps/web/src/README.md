@@ -4,7 +4,8 @@ The old lightweight Node-rendered HTML shell still lives in `src/` as reference 
 
 ## Active frontend
 - `app/` contains the real Next.js entrypoints and page structure
-- `lib/mock-overview.ts` holds the mocked Mission Control data flow
+- `lib/api.ts` fetches the dashboard data from the Mission Control API
+- `app/realtime-status.tsx` provides a small websocket-backed realtime status card
 - `app/globals.css` preserves the dashboard + office aesthetic in the new React app
 
 ## Why the legacy shell remains

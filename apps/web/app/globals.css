@@ -178,7 +178,8 @@ select {
 .room-section,
 .task-column,
 .session-item,
-.alert-item {
+.alert-item,
+.realtime-status {
   padding: 20px;
 }
 
@@ -347,6 +348,32 @@ select {
 .event-row time {
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.realtime-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.84rem;
+}
+
+.realtime-pill--live {
+  color: oklch(0.9 0.11 160);
+  background: color-mix(in srgb, var(--priority-low) 22%, transparent);
+}
+
+.realtime-pill--pending {
+  color: oklch(0.92 0.11 85);
+  background: color-mix(in srgb, var(--priority-high) 18%, transparent);
+}
+
+.realtime-pill--idle {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .health-grid {

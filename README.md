@@ -9,7 +9,7 @@ It combines:
 ## Current status
 This repository currently contains a **mock MVP skeleton**:
 - Fastify-based backend scaffold in `apps/api`
-- Next.js frontend shell in `apps/web`
+- Next.js frontend in `apps/web`, now fetching dashboard data from the API
 - shared contracts in `packages/contracts`
 - planning and design artifacts in `mission-control/`
 
@@ -69,6 +69,12 @@ npm run dev:web
 This starts the Next.js frontend on:
 - `http://localhost:3000`
 
+By default, the frontend calls the API at `http://127.0.0.1:4000`.
+Override that if needed with:
+```bash
+MISSION_CONTROL_API_URL=http://your-api-host:4000 npm run dev:web
+```
+
 ## Local scripts
 
 ### Root
@@ -114,9 +120,10 @@ npm --workspace @mission-control/web run typecheck
 - `GET /ws/v1` — websocket shell (hello + mock health heartbeat)
 
 ## Notes on the current implementation
-- data is still mocked/in-memory
-- the web app is now a real Next.js app-router frontend using local mock data
-- websocket support is only a shell for now
+- data is still mocked/in-memory on the API side
+- the web app is now a real Next.js app-router frontend fetching overview, rooms, agents, tasks, and events from the API
+- the frontend also includes a small websocket client for realtime connection status
+- websocket support is still only a shell on the backend side
 - route validation schemas are now wired into Fastify for the mutation endpoints and ID-based routes
 
 ## Recommended next steps
