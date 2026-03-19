@@ -1,11 +1,13 @@
 import { agents, sessions, tasks, events, rooms, placements, taskHistory } from '../mock-data.js'
+import { getRuntimeSnapshot } from '../integrations.openclaw-runtime.js'
 
 export function listAgents() {
-  return agents
+  const runtimeAgents = getRuntimeSnapshot().agents
+  return runtimeAgents.length ? runtimeAgents : agents
 }
 
 export function getAgent(id) {
-  return agents.find((agent) => agent.id === id) || null
+  return listAgents().find((agent) => agent.id === id) || null
 }
 
 export function updateAgent(id, patch) {
@@ -16,11 +18,12 @@ export function updateAgent(id, patch) {
 }
 
 export function listSessions() {
-  return sessions
+  const runtimeSessions = getRuntimeSnapshot().sessions
+  return runtimeSessions.length ? runtimeSessions : sessions
 }
 
 export function getSession(id) {
-  return sessions.find((session) => session.id === id) || null
+  return listSessions().find((session) => session.id === id) || null
 }
 
 export function updateSession(id, patch) {
@@ -86,11 +89,13 @@ export function getEventsFor(filter) {
 }
 
 export function listRooms() {
-  return rooms
+  const runtimeRooms = getRuntimeSnapshot().rooms
+  return runtimeRooms.length ? [...runtimeRooms, ...rooms] : rooms
 }
 
 export function listPlacements() {
-  return placements
+  const runtimePlacements = getRuntimeSnapshot().placements
+  return runtimePlacements.length ? [...runtimePlacements, ...placements] : placements
 }
 
 export function getTaskHistory(taskId) {

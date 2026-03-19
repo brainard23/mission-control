@@ -12,6 +12,7 @@ import {
   listSessions,
   listTasks,
 } from './repository.js'
+import { getRuntimeSnapshot } from '../integrations.openclaw-runtime.js'
 
 export function buildAgentCard(agent) {
   return {
@@ -28,6 +29,7 @@ export function getOverview() {
   const sessions = listSessions()
   const tasks = listTasks()
   const events = listEvents()
+  const runtime = getRuntimeSnapshot()
 
   return {
     stats: {
@@ -37,8 +39,8 @@ export function getOverview() {
       tasksInProgress: tasks.filter((task) => task.status === 'in_progress').length,
       blockedTasks: tasks.filter((task) => task.status === 'blocked').length,
       failedTasks: tasks.filter((task) => task.status === 'failed').length,
-      staleAgents: 0,
-      staleSessions: 0,
+      staleAgents: runtime.sync.isStale ? agents.length : 0,
+      staleSessions: runtime.sync.isStale ? sessions.length : 0,
     },
     alerts: tasks.filter((task) => task.status === 'blocked').map((task) => ({
       id: `alert_${task.id}`,
@@ -50,26 +52,30 @@ export function getOverview() {
       sessionId: task.sessionId || null,
     })),
     health: {
-      backendStatus: 'healthy',
-      gatewayStatus: 'unknown',
-      nodesOnline: 0,
-      websocketReady: true,
-      lastSyncAt: new Date().toISOString(),
+      backendStatus: runtime.health.backendStatus,
+      gatewayStatus: runtime.health.gatewayStatus,
+      nodesOnline: runtime.health.nodesOnline,
+      websocketReady: runtime.health.websocketReady,
+      lastSyncAt: runtime.health.lastSyncAt,
     },
     recentEvents: events,
   }
 }
 
 export function getHealth() {
+  const runtime = getRuntimeSnapshot()
+
   return {
-    backendStatus: 'healthy',
-    gatewayStatus: 'unknown',
-    nodesOnline: 0,
+    backendStatus: runtime.health.backendStatus,
+    gatewayStatus: runtime.health.gatewayStatus,
+    nodesOnline: runtime.health.nodesOnline,
     sync: {
-      lastSyncAt: new Date().toISOString(),
-      adapterFailures: 0,
+      lastSyncAt: runtime.sync.lastSyncAt,
+      adapterFailures: runtime.sync.failureCount,
+      lastError: runtime.sync.lastError,
+      stale: runtime.sync.isStale,
     },
-    websocketReady: true,
+    websocketReady: runtime.health.websocketReady,
   }
 }
 

@@ -1,5 +1,5 @@
 import { subscribeRealtime } from './hub.js'
-import { getDashboardSnapshot } from '../domain/services.js'
+import { getDashboardSnapshot, getHealth } from '../domain/services.js'
 
 function send(socket, message) {
   if (socket.readyState === 1) {
@@ -30,14 +30,15 @@ export function registerRealtime(app) {
       })
 
       const heartbeat = setInterval(() => {
+        const health = getHealth()
         send(socket, {
           type: 'health.updated',
           ts: new Date().toISOString(),
           payload: {
-            backendStatus: 'healthy',
-            gatewayStatus: 'unknown',
-            nodesOnline: 0,
-            lastSyncAt: new Date().toISOString(),
+            backendStatus: health.backendStatus,
+            gatewayStatus: health.gatewayStatus,
+            nodesOnline: health.nodesOnline,
+            lastSyncAt: health.sync.lastSyncAt || new Date().toISOString(),
           },
         })
       }, 15000)

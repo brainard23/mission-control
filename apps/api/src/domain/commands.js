@@ -8,7 +8,7 @@ import {
   updateAgent,
   updateSession,
 } from './repository.js'
-import { buildAgentCard, getDashboardSnapshot } from './services.js'
+import { buildAgentCard, getDashboardSnapshot, getHealth } from './services.js'
 import { publishRealtime } from '../realtime/hub.js'
 
 function emit(type, payload) {
@@ -20,11 +20,12 @@ function emit(type, payload) {
 }
 
 function emitHealth() {
+  const health = getHealth()
   emit('health.updated', {
-    backendStatus: 'healthy',
-    gatewayStatus: 'unknown',
-    nodesOnline: 0,
-    lastSyncAt: new Date().toISOString(),
+    backendStatus: health.backendStatus,
+    gatewayStatus: health.gatewayStatus,
+    nodesOnline: health.nodesOnline,
+    lastSyncAt: health.sync.lastSyncAt || new Date().toISOString(),
   })
 }
 

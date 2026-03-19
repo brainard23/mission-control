@@ -1,0 +1,234 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
+const LIVE_ROOM_ID = 'room_runtime_live'
+const ACTIVE_WINDOW_MINUTES = Number(process.env.MISSION_CONTROL_ACTIVE_WINDOW_MINUTES || 240)
+const REFRESH_INTERVAL_MS = Number(process.env.MISSION_CONTROL_RUNTIME_REFRESH_MS || 15000)
+const STALE_AFTER_MS = Number(process.env.MISSION_CONTROL_RUNTIME_STALE_MS || 60000)
+
+const state = {
+  snapshot: {
+    agents: [],
+    sessions: [],
+    rooms: [],
+    placements: [],
+    health: {
+      backendStatus: 'healthy',
+      gatewayStatus: 'unknown',
+      nodesOnline: 0,
+      websocketReady: true,
+      lastSyncAt: null,
+    },
+  },
+  sync: {
+    lastSyncAt: null,
+    lastAttemptAt: null,
+    failureCount: 0,
+    lastError: null,
+  },
+  started: false,
+  timer: null,
+  refreshing: null,
+}
+
+function slug(input) {
+  return String(input)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function parseRuntimeFromKey(key) {
+  if (key.includes(':subagent:')) return 'subagent'
+  if (key.includes(':acp:') || key.includes(':agent:')) return 'acp'
+  return 'main'
+}
+
+function titleCase(value) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value
+}
+
+function buildAgentName(session) {
+  const provider = session.agentId ? titleCase(session.agentId) : 'OpenClaw'
+  const runtime = parseRuntimeFromKey(session.key)
+  if (runtime === 'main') return `${provider} Main`
+  if (runtime === 'subagent') return `${provider} Subagent`
+  return `${provider} ACP`
+}
+
+function mapSession(session, agentId) {
+  const runtime = parseRuntimeFromKey(session.key)
+  const startedAt = new Date(session.updatedAt - (session.ageMs || 0)).toISOString()
+  return {
+    id: session.sessionId || `session_${slug(session.key)}`,
+    label: session.key,
+    agentId,
+    runtime,
+    model: session.model || null,
+    state: 'active',
+    startedAt,
+    lastActivityAt: new Date(session.updatedAt).toISOString(),
+    currentTaskId: null,
+    summary: `${titleCase(runtime)} session active in OpenClaw`,
+    metadata: {
+      originalKey: session.key,
+      providerAgentId: session.agentId || null,
+      kind: session.kind || null,
+      modelProvider: session.modelProvider || null,
+      totalTokens: session.totalTokens ?? null,
+    },
+  }
+}
+
+function mapAgent(session, agentId, sessionId) {
+  const runtime = parseRuntimeFromKey(session.key)
+  return {
+    id: agentId,
+    name: buildAgentName(session),
+    type: runtime,
+    role: runtime === 'main' ? 'Primary assistant' : runtime === 'subagent' ? 'Delegated worker' : 'ACP runtime',
+    capabilities: [runtime, session.model, session.modelProvider].filter(Boolean),
+    status: 'working',
+    roomId: LIVE_ROOM_ID,
+    currentSessionId: sessionId,
+    currentTaskId: null,
+    lastActivityAt: new Date(session.updatedAt).toISOString(),
+    runtimeSource: 'openclaw',
+    metadata: {
+      originalKey: session.key,
+      providerAgentId: session.agentId || null,
+      kind: session.kind || null,
+      sessionId,
+    },
+  }
+}
+
+function mapPresenceHealth(presenceEntries, lastSyncAt) {
+  const gatewayEntry = presenceEntries.find((entry) => entry.mode === 'gateway' || entry.reason === 'self')
+  const nodeEntries = presenceEntries.filter((entry) => entry.roles?.includes('operator') || entry.mode === 'backend')
+
+  return {
+    backendStatus: 'healthy',
+    gatewayStatus: gatewayEntry ? 'healthy' : 'unknown',
+    nodesOnline: nodeEntries.length,
+    websocketReady: true,
+    lastSyncAt,
+  }
+}
+
+async function runOpenClawJson(args) {
+  const { stdout } = await execFileAsync('openclaw', args, {
+    cwd: process.cwd(),
+    timeout: 10000,
+    maxBuffer: 1024 * 1024,
+    env: process.env,
+  })
+
+  return JSON.parse(stdout)
+}
+
+async function fetchRuntimeSnapshot() {
+  const [presence, sessionsPayload] = await Promise.all([
+    runOpenClawJson(['system', 'presence', '--json']),
+    runOpenClawJson(['sessions', '--all-agents', '--active', String(ACTIVE_WINDOW_MINUTES), '--json']),
+  ])
+
+  const activeSessions = Array.isArray(sessionsPayload.sessions) ? sessionsPayload.sessions : []
+  const agents = []
+  const sessions = []
+  const placements = []
+
+  activeSessions
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+    .forEach((session, index) => {
+      const agentId = `agent_${slug(session.key)}`
+      const mappedSession = mapSession(session, agentId)
+      const mappedAgent = mapAgent(session, agentId, mappedSession.id)
+      agents.push(mappedAgent)
+      sessions.push(mappedSession)
+      placements.push({
+        id: `placement_${agentId}`,
+        roomId: LIVE_ROOM_ID,
+        agentId,
+        x: index % 3,
+        y: Math.floor(index / 3),
+        w: 1,
+        h: 1,
+        zIndex: 0,
+        metadata: { generated: true },
+      })
+    })
+
+  const lastSyncAt = new Date().toISOString()
+
+  return {
+    agents,
+    sessions,
+    rooms: [
+      {
+        id: LIVE_ROOM_ID,
+        name: 'Live Runtime',
+        kind: 'infra',
+        sortOrder: 0,
+        metadata: { generated: true, source: 'openclaw' },
+      },
+    ],
+    placements,
+    health: mapPresenceHealth(Array.isArray(presence) ? presence : [], lastSyncAt),
+    lastSyncAt,
+  }
+}
+
+export function getRuntimeSnapshot() {
+  const lastSyncMs = state.sync.lastSyncAt ? Date.parse(state.sync.lastSyncAt) : 0
+  const isStale = !lastSyncMs || Date.now() - lastSyncMs > STALE_AFTER_MS
+  return {
+    ...state.snapshot,
+    health: {
+      ...state.snapshot.health,
+      gatewayStatus: isStale && state.sync.lastSyncAt ? 'degraded' : state.snapshot.health.gatewayStatus,
+      lastSyncAt: state.sync.lastSyncAt,
+    },
+    sync: { ...state.sync, isStale },
+  }
+}
+
+export async function refreshRuntimeSnapshot() {
+  if (state.refreshing) return state.refreshing
+
+  state.sync.lastAttemptAt = new Date().toISOString()
+  state.refreshing = fetchRuntimeSnapshot()
+    .then((snapshot) => {
+      state.snapshot = {
+        agents: snapshot.agents,
+        sessions: snapshot.sessions,
+        rooms: snapshot.rooms,
+        placements: snapshot.placements,
+        health: snapshot.health,
+      }
+      state.sync.lastSyncAt = snapshot.lastSyncAt
+      state.sync.failureCount = 0
+      state.sync.lastError = null
+      return getRuntimeSnapshot()
+    })
+    .catch((error) => {
+      state.sync.failureCount += 1
+      state.sync.lastError = error instanceof Error ? error.message : String(error)
+      return getRuntimeSnapshot()
+    })
+    .finally(() => {
+      state.refreshing = null
+    })
+
+  return state.refreshing
+}
+
+export function startRuntimeSync() {
+  if (state.started) return
+  state.started = true
+  refreshRuntimeSnapshot().catch(() => {})
+  state.timer = setInterval(() => {
+    refreshRuntimeSnapshot().catch(() => {})
+  }, REFRESH_INTERVAL_MS)
+}

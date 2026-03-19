@@ -7,7 +7,7 @@ It combines:
 - an **Office View** where agents appear at tables/desks so multi-agent work is easier to understand visually
 
 ## Current status
-This repository currently contains a **mock MVP skeleton with a practical realtime pass**:
+This repository currently contains a **mock MVP skeleton with a practical realtime pass and first live OpenClaw runtime presence adapter**:
 - Fastify-based backend scaffold in `apps/api`
 - Next.js frontend in `apps/web`, fetching dashboard data from the API
 - shared contracts in `packages/contracts`
@@ -159,9 +159,11 @@ Postgres is now documented and bootstrapped at a first-pass level:
 The API does **not** persist to Postgres yet. That is the next repository-layer step, not part of this pass.
 
 ## Notes on the current implementation
-- data is still mocked/in-memory on the API side
+- tasks/events/mutations are still mocked/in-memory on the API side
+- agent/session presence now prefers live OpenClaw runtime data from the local CLI (`openclaw sessions --all-agents --active ... --json` + `openclaw system presence --json`) and falls back to mock agents/sessions when live data is unavailable
 - the web app is a real Next.js app-router frontend fetching overview, rooms, agents, tasks, and events from the API
 - the frontend now keeps a live local dashboard state hydrated by websocket snapshots + mutation events
+- the Office View can now show the current main assistant and active subagents in a generated `Live Runtime` room when OpenClaw session data is available
 - websocket support now includes snapshot resync and mutation-driven broadcasts
 - route validation schemas are wired into Fastify for the mutation endpoints and ID-based routes
 
