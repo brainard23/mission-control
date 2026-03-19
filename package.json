@@ -11,5 +11,8 @@
     "dev:web": "npm --workspace @mission-control/web run dev",
     "dev:api": "npm --workspace @mission-control/api run dev",
     "typecheck": "npm run -ws typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }
