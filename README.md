@@ -8,7 +8,7 @@ It combines:
 
 ## Current status
 This repository currently contains a **mock MVP skeleton**:
-- modular backend scaffold in `apps/api`
+- Fastify-based backend scaffold in `apps/api`
 - rendered frontend shell in `apps/web`
 - shared contracts in `packages/contracts`
 - planning and design artifacts in `mission-control/`
@@ -24,7 +24,7 @@ It is not production-ready yet, but it is structured to evolve into:
 
 ```text
 apps/
-  api/          # backend scaffold + mock data routes
+  api/          # backend scaffold + mock data routes + websocket shell
   web/          # frontend shell + mock dashboard renderer
 packages/
   contracts/    # shared domain/API/websocket contracts
@@ -35,7 +35,65 @@ mission-control/
   IMPLEMENTATION_CHECKLIST.md
 ```
 
-## Current mock API routes
+## Prerequisites
+- Node.js 22+ recommended
+- npm 10+ recommended
+
+## Setup locally
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/brainard23/mission-control.git
+cd mission-control
+```
+
+### 2. Install dependencies
+```bash
+npm install
+```
+
+### 3. Run the API
+```bash
+npm run dev:api
+```
+
+This starts the backend on:
+- `http://localhost:4000`
+
+### 4. Run the web shell
+In a second terminal:
+```bash
+npm run dev:web
+```
+
+This starts the mock frontend shell on:
+- `http://localhost:3000`
+
+## Local scripts
+
+### Root
+```bash
+npm run dev:api
+npm run dev:web
+npm run build
+npm run typecheck
+```
+
+### API only
+```bash
+npm --workspace @mission-control/api run dev
+npm --workspace @mission-control/api run build
+npm --workspace @mission-control/api run typecheck
+```
+
+### Web only
+```bash
+npm --workspace @mission-control/web run dev
+npm --workspace @mission-control/web run build
+npm --workspace @mission-control/web run typecheck
+```
+
+## Current API routes
 - `GET /health`
 - `GET /api/v1/health`
 - `GET /api/v1/overview`
@@ -53,26 +111,17 @@ mission-control/
 - `POST /api/v1/tasks/:id/retry`
 - `POST /api/v1/sessions/:id/message`
 - `POST /api/v1/sessions/:id/stop`
+- `GET /ws/v1` — websocket shell (hello + mock health heartbeat)
 
-## Local development
-
-### API
-```bash
-node apps/api/src/server.js
-```
-
-### Web shell
-```bash
-node apps/web/src/server.js
-```
-
-Then open:
-- API: `http://localhost:4000`
-- Web: `http://localhost:3000`
+## Notes on the current implementation
+- data is still mocked/in-memory
+- the web app is still a rendered Node shell, not Next.js yet
+- websocket support is only a shell for now
+- route validation schemas are now wired into Fastify for the mutation endpoints and ID-based routes
 
 ## Recommended next steps
-1. replace the lightweight HTTP layer with Fastify
+1. split Fastify routes into per-resource modules
 2. replace the rendered Node web shell with a real Next.js app
-3. add WebSocket updates
-4. replace mock data with repositories + Postgres
+3. connect the web app to the API instead of local mock data
+4. replace mock repositories with Postgres-backed persistence
 5. wire the backend to real OpenClaw runtime state

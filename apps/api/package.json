@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fastify/websocket": "^11.0.1",
     "@mission-control/contracts": "0.1.0",
     "fastify": "^5.2.1"
   }

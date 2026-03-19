@@ -13,6 +13,15 @@ import {
   getTasksView,
 } from '../domain/services.js'
 import { assignTask, retryTask, sendSessionMessage, stopSession, updateTask } from '../domain/commands.js'
+import {
+  assignTaskBodySchema,
+  createTaskBodySchema,
+  idParamSchema,
+  retryTaskBodySchema,
+  sessionMessageBodySchema,
+  sessionStopBodySchema,
+  updateTaskBodySchema,
+} from './schemas.js'
 
 export function registerRoutes(app) {
   app.get('/health', async (_request, reply) => {
@@ -31,7 +40,7 @@ export function registerRoutes(app) {
     return sendJson(reply, 200, { data: { items: getAgentsView() } })
   })
 
-  app.get('/api/v1/agents/:id', async (request, reply) => {
+  app.get('/api/v1/agents/:id', { schema: { params: idParamSchema } }, async (request, reply) => {
     const view = getAgentView(request.params.id)
     if (!view) {
       return sendJson(reply, 404, { error: { code: 'AGENT_NOT_FOUND', message: `Agent ${request.params.id} was not found` } })
@@ -43,7 +52,7 @@ export function registerRoutes(app) {
     return sendJson(reply, 200, { data: { items: getSessionsView() } })
   })
 
-  app.get('/api/v1/sessions/:id', async (request, reply) => {
+  app.get('/api/v1/sessions/:id', { schema: { params: idParamSchema } }, async (request, reply) => {
     const view = getSessionView(request.params.id)
     if (!view) {
       return sendJson(reply, 404, { error: { code: 'SESSION_NOT_FOUND', message: `Session ${request.params.id} was not found` } })
@@ -55,7 +64,7 @@ export function registerRoutes(app) {
     return sendJson(reply, 200, { data: { items: getTasksView() } })
   })
 
-  app.get('/api/v1/tasks/:id', async (request, reply) => {
+  app.get('/api/v1/tasks/:id', { schema: { params: idParamSchema } }, async (request, reply) => {
     const view = getTaskView(request.params.id)
     if (!view) {
       return sendJson(reply, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${request.params.id} was not found` } })
@@ -71,12 +80,12 @@ export function registerRoutes(app) {
     return sendJson(reply, 200, { data: getRoomsView() })
   })
 
-  app.post('/api/v1/tasks', async (request, reply) => {
+  app.post('/api/v1/tasks', { schema: { body: createTaskBodySchema } }, async (request, reply) => {
     const task = createTaskView(request.body || {})
     return sendJson(reply, 201, { data: { task } })
   })
 
-  app.patch('/api/v1/tasks/:id', async (request, reply) => {
+  app.patch('/api/v1/tasks/:id', { schema: { params: idParamSchema, body: updateTaskBodySchema } }, async (request, reply) => {
     const task = updateTask(request.params.id, request.body || {})
     if (!task) {
       return sendJson(reply, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${request.params.id} was not found` } })
@@ -84,7 +93,7 @@ export function registerRoutes(app) {
     return sendJson(reply, 200, { data: { task } })
   })
 
-  app.post('/api/v1/tasks/:id/assign', async (request, reply) => {
+  app.post('/api/v1/tasks/:id/assign', { schema: { params: idParamSchema, body: assignTaskBodySchema } }, async (request, reply) => {
     const task = assignTask(request.params.id, request.body?.agentId)
     if (!task) {
       return sendJson(reply, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${request.params.id} was not found` } })
@@ -92,7 +101,7 @@ export function registerRoutes(app) {
     return sendJson(reply, 200, { data: { task } })
   })
 
-  app.post('/api/v1/tasks/:id/retry', async (request, reply) => {
+  app.post('/api/v1/tasks/:id/retry', { schema: { params: idParamSchema, body: retryTaskBodySchema } }, async (request, reply) => {
     const task = retryTask(request.params.id, request.body?.reason)
     if (!task) {
       return sendJson(reply, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${request.params.id} was not found` } })
@@ -100,7 +109,7 @@ export function registerRoutes(app) {
     return sendJson(reply, 200, { data: { task } })
   })
 
-  app.post('/api/v1/sessions/:id/message', async (request, reply) => {
+  app.post('/api/v1/sessions/:id/message', { schema: { params: idParamSchema, body: sessionMessageBodySchema } }, async (request, reply) => {
     const result = sendSessionMessage(request.params.id, request.body?.message)
     if (!result) {
       return sendJson(reply, 404, { error: { code: 'SESSION_NOT_FOUND', message: `Session ${request.params.id} was not found` } })
@@ -108,7 +117,7 @@ export function registerRoutes(app) {
     return sendJson(reply, 202, { data: result })
   })
 
-  app.post('/api/v1/sessions/:id/stop', async (request, reply) => {
+  app.post('/api/v1/sessions/:id/stop', { schema: { params: idParamSchema, body: sessionStopBodySchema } }, async (request, reply) => {
     const result = stopSession(request.params.id, request.body?.reason)
     if (!result) {
       return sendJson(reply, 404, { error: { code: 'SESSION_NOT_FOUND', message: `Session ${request.params.id} was not found` } })
