@@ -18,9 +18,9 @@
 - [x] Create Fastify app shell
 - [x] Add health route
 - [ ] Build OpenClaw client abstraction
-- [ ] Implement adapters for sessions/subagents/nodes/gateway
-- [ ] Implement runtime sync loop
-- [ ] Implement reconciler and stale detection
+- [x] Implement adapters for sessions/subagents/nodes/gateway
+- [x] Implement runtime sync loop
+- [x] Implement reconciler and stale detection
 - [x] Add in-memory runtime cache
 
 ## Milestone 3 — Core APIs

@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { buildAgentCard, getDashboardSnapshot, getHealth } from './domain/services.js'
+import { publishRealtime } from './realtime/hub.js'
 
 const execFileAsync = promisify(execFile)
 const LIVE_ROOM_ID = 'room_runtime_live'
@@ -117,6 +119,128 @@ function mapPresenceHealth(presenceEntries, lastSyncAt) {
   }
 }
 
+function emit(type, payload) {
+  publishRealtime({
+    type,
+    ts: new Date().toISOString(),
+    payload,
+  })
+}
+
+function emitHealth() {
+  const health = getHealth()
+  emit('health.updated', {
+    backendStatus: health.backendStatus,
+    gatewayStatus: health.gatewayStatus,
+    nodesOnline: health.nodesOnline,
+    lastSyncAt: health.sync.lastSyncAt || new Date().toISOString(),
+  })
+}
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableSerialize(item)).join(',')}]`
+  }
+
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(',')}}`
+  }
+
+  return JSON.stringify(value)
+}
+
+function indexById(items) {
+  return new Map(items.map((item) => [item.id, item]))
+}
+
+export function diffRuntimeSnapshots(previousSnapshot, nextSnapshot) {
+  const previousAgents = indexById(previousSnapshot.agents || [])
+  const nextAgents = indexById(nextSnapshot.agents || [])
+  const previousSessions = indexById(previousSnapshot.sessions || [])
+  const nextSessions = indexById(nextSnapshot.sessions || [])
+
+  const addedAgentIds = []
+  const removedAgentIds = []
+  const changedAgentIds = []
+  const addedSessionIds = []
+  const removedSessionIds = []
+  const changedSessionIds = []
+
+  for (const [id, agent] of nextAgents) {
+    if (!previousAgents.has(id)) {
+      addedAgentIds.push(id)
+      continue
+    }
+
+    if (stableSerialize(previousAgents.get(id)) !== stableSerialize(agent)) {
+      changedAgentIds.push(id)
+    }
+  }
+
+  for (const id of previousAgents.keys()) {
+    if (!nextAgents.has(id)) removedAgentIds.push(id)
+  }
+
+  for (const [id, session] of nextSessions) {
+    if (!previousSessions.has(id)) {
+      addedSessionIds.push(id)
+      continue
+    }
+
+    if (stableSerialize(previousSessions.get(id)) !== stableSerialize(session)) {
+      changedSessionIds.push(id)
+    }
+  }
+
+  for (const id of previousSessions.keys()) {
+    if (!nextSessions.has(id)) removedSessionIds.push(id)
+  }
+
+  const roomsChanged = stableSerialize(previousSnapshot.rooms || []) !== stableSerialize(nextSnapshot.rooms || [])
+  const placementsChanged = stableSerialize(previousSnapshot.placements || []) !== stableSerialize(nextSnapshot.placements || [])
+  const healthChanged = stableSerialize(previousSnapshot.health || {}) !== stableSerialize(nextSnapshot.health || {})
+
+  return {
+    addedAgentIds,
+    removedAgentIds,
+    changedAgentIds,
+    addedSessionIds,
+    removedSessionIds,
+    changedSessionIds,
+    roomsChanged,
+    placementsChanged,
+    healthChanged,
+    hasPresenceChanges: Boolean(
+      addedAgentIds.length || removedAgentIds.length || changedAgentIds.length
+      || addedSessionIds.length || removedSessionIds.length || changedSessionIds.length
+      || roomsChanged || placementsChanged
+    ),
+  }
+}
+
+function publishRuntimeRefresh(previousSnapshot, nextSnapshot) {
+  const diff = diffRuntimeSnapshots(previousSnapshot, nextSnapshot)
+  if (!diff.hasPresenceChanges && !diff.healthChanged) return
+
+  const changedAgentIds = [...new Set([...diff.addedAgentIds, ...diff.changedAgentIds])]
+  const changedSessionIds = [...new Set([...diff.addedSessionIds, ...diff.changedSessionIds])]
+  const nextSessions = indexById(nextSnapshot.sessions || [])
+
+  for (const agentId of changedAgentIds) {
+    const agentCard = buildAgentCard(nextSnapshot.agents.find((agent) => agent.id === agentId))
+    emit('agent.updated', agentCard)
+  }
+
+  for (const sessionId of changedSessionIds) {
+    const session = nextSessions.get(sessionId)
+    if (!session) continue
+    emit('session.updated', { session })
+  }
+
+  emit('overview.snapshot', getDashboardSnapshot())
+  emitHealth()
+}
+
 async function runOpenClawJson(args) {
   const { stdout } = await execFileAsync('openclaw', args, {
     cwd: process.cwd(),
@@ -200,6 +324,7 @@ export async function refreshRuntimeSnapshot() {
   state.sync.lastAttemptAt = new Date().toISOString()
   state.refreshing = fetchRuntimeSnapshot()
     .then((snapshot) => {
+      const previousSnapshot = state.snapshot
       state.snapshot = {
         agents: snapshot.agents,
         sessions: snapshot.sessions,
@@ -210,6 +335,7 @@ export async function refreshRuntimeSnapshot() {
       state.sync.lastSyncAt = snapshot.lastSyncAt
       state.sync.failureCount = 0
       state.sync.lastError = null
+      publishRuntimeRefresh(previousSnapshot, state.snapshot)
       return getRuntimeSnapshot()
     })
     .catch((error) => {

@@ -145,8 +145,9 @@ Current websocket behavior is now intentionally useful, not just a shell:
 - sends `connection.hello` on connect
 - sends `overview.snapshot` immediately after connect for fast resync
 - broadcasts `task.updated`, `session.updated`, `agent.updated`, and `event.created` on in-memory mutations
+- broadcasts runtime presence changes from the OpenClaw sync loop immediately when live agents/sessions appear, disappear, or update, and emits a fresh `overview.snapshot` so removals are reflected without reconnecting
 - emits periodic `health.updated` heartbeats
-- frontend applies websocket updates client-side so task board, office cards, event feed, and infra status refresh without a page reload
+- frontend applies websocket updates client-side so task board, office cards, session lists, and infra status refresh without a page reload
 
 This is still mock/in-memory state, but it preserves the intended architecture for later runtime adapters and a Postgres repository.
 
