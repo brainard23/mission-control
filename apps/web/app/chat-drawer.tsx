@@ -33,6 +33,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
         <span>{formatTime(msg.ts)}</span>
         {msg.model && <span>{msg.model}</span>}
         {msg.durationMs != null && <span>{(msg.durationMs / 1000).toFixed(1)}s</span>}
+        {(msg as any).delivered && <span className="badge badge--green">📤 Delivered</span>}
       </div>
     </div>
   )
@@ -47,6 +48,9 @@ export function ChatDrawer({ apiBaseUrl, open, onClose }: ChatDrawerProps) {
   const [error, setError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [loadingAgents, setLoadingAgents] = useState(false)
+  const [deliver, setDeliver] = useState(false)
+  const [deliverChannel, setDeliverChannel] = useState('whatsapp')
+  const [deliverTarget, setDeliverTarget] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -108,7 +112,8 @@ export function ChatDrawer({ apiBaseUrl, open, onClose }: ChatDrawerProps) {
     setMessages((prev) => [...prev, userMsg])
 
     try {
-      const result: ChatReply = await sendChatMessage(apiBaseUrl, selectedAgent, text, sessionId || undefined)
+      const deliveryOpts = deliver ? { deliver: true, channel: deliverChannel, replyTo: deliverTarget || undefined } : undefined
+      const result: ChatReply = await sendChatMessage(apiBaseUrl, selectedAgent, text, sessionId || undefined, deliveryOpts)
       if (result.sessionId) setSessionId(result.sessionId)
 
       const assistantMsg: ChatMessage = {
@@ -209,6 +214,31 @@ export function ChatDrawer({ apiBaseUrl, open, onClose }: ChatDrawerProps) {
             {error}
           </div>
         )}
+
+        <div className="chat-drawer__deliver">
+          <label className="chat-deliver-toggle">
+            <input type="checkbox" checked={deliver} onChange={(e) => setDeliver(e.target.checked)} />
+            <span>Deliver reply to channel</span>
+          </label>
+          {deliver && (
+            <div className="chat-deliver-opts">
+              <select value={deliverChannel} onChange={(e) => setDeliverChannel(e.target.value)}>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="telegram">Telegram</option>
+                <option value="discord">Discord</option>
+                <option value="slack">Slack</option>
+                <option value="signal">Signal</option>
+              </select>
+              <input
+                type="text"
+                placeholder="Target (e.g. +639166543866)"
+                value={deliverTarget}
+                onChange={(e) => setDeliverTarget(e.target.value)}
+                className="chat-deliver-target"
+              />
+            </div>
+          )}
+        </div>
 
         <form className="chat-drawer__composer" onSubmit={(e) => { e.preventDefault(); handleSend() }}>
           <textarea

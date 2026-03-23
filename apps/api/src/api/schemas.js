@@ -28,7 +28,7 @@ export const updateTaskBodySchema = {
   properties: {
     title: { type: 'string', minLength: 1, maxLength: 200 },
     description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    status: { type: 'string', enum: ['queued', 'in_progress', 'waiting', 'blocked', 'done', 'failed'] },
+    status: { type: 'string', minLength: 1 },
     priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
     blockerReason: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     tags: {
@@ -75,6 +75,9 @@ export const chatMessageBodySchema = {
   properties: {
     message: { type: 'string', minLength: 1, maxLength: 4000 },
     sessionId: { type: 'string' },
+    deliver: { type: 'boolean' },
+    channel: { type: 'string' },
+    replyTo: { type: 'string' },
   },
 }
 

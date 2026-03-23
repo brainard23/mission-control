@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AgentCard,
   Event,
@@ -11,14 +11,19 @@ import type {
   Session,
   Task,
 } from '@mission-control/contracts'
-import { RealtimeStatus } from './realtime-status'
 import { ChatDrawer } from './chat-drawer'
+import { SkillsPage } from './skills-page'
+import { KanbanBoard } from './kanban-board'
+import { UsagePage } from './usage-page'
+import { CronPage } from './cron-page'
+import { DoctorPage } from './doctor-page'
+import { ActivityPage } from './activity-page'
+import { MemoryPage } from './memory-page'
+import { ChannelsPage } from './channels-page'
 import {
-  createTask as apiCreateTask,
-  updateTaskStatus as apiUpdateTask,
-  retryTask as apiRetryTask,
-  sendSessionMessage as apiSendMessage,
-  stopSession as apiStopSession,
+  sendChatMessage,
+  fetchChatAgents,
+  type ChatAgent,
 } from '../lib/api'
 
 type DashboardProps = {
@@ -35,570 +40,508 @@ type DashboardState = Omit<DashboardProps, 'websocketUrl' | 'apiBaseUrl'> & {
   sessions: Session[]
 }
 
-const NAV_SECTIONS = [
-  { label: 'Overview', id: 'section-overview' },
-  { label: 'Office', id: 'section-office' },
-  { label: 'Sessions', id: 'section-sessions' },
-  { label: 'Tasks', id: 'section-tasks' },
-  { label: 'Events', id: 'section-events' },
-  { label: 'Infra', id: 'section-infra' },
-] as const
+type NavPage = 'office' | 'tasks' | 'sessions' | 'events' | 'infra' | 'skills' | 'usage' | 'cron' | 'doctor' | 'activity' | 'memory' | 'channels'
 
-const statusTone: Record<string, string> = {
-  idle: 'var(--status-idle)',
-  working: 'var(--status-working)',
-  waiting: 'var(--status-waiting)',
-  blocked: 'var(--status-blocked)',
-  failed: 'var(--status-failed)',
-  offline: 'var(--status-offline)',
+// Stable color per agent name
+const SPRITE_PALETTES = [
+  '#7c5cfc', '#3cb7e0', '#40d680', '#fc5c8c',
+  '#f0a030', '#4c8cfc', '#e05050', '#b060e0',
+]
+
+const STATUS_DOT: Record<string, string> = {
+  working: '#40d680', idle: '#888', waiting: '#f0c040',
+  blocked: '#e05050', failed: '#e05050', offline: '#555',
 }
 
-const priorityTone: Record<string, string> = {
-  low: 'var(--priority-low)',
-  normal: 'var(--priority-normal)',
-  high: 'var(--priority-high)',
-  urgent: 'var(--priority-urgent)',
+function agentColor(index: number) { return SPRITE_PALETTES[index % SPRITE_PALETTES.length] }
+
+function formatTimeAgo(value?: string | null) {
+  if (!value) return ''
+  const diff = Date.now() - new Date(value).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  return hrs < 24 ? `${hrs}h ago` : `${Math.floor(hrs / 24)}d ago`
 }
 
-function formatUtc(value?: string | null) {
-  if (!value) return 'No timestamp'
-  return value.replace('T', ' ').replace('Z', ' UTC')
+function upsertById<T extends { id: string }>(items: T[], next: T) {
+  const i = items.findIndex((x) => x.id === next.id)
+  if (i === -1) return [next, ...items]
+  const c = [...items]; c[i] = next; return c
 }
 
-function upsertById<T extends { id: string }>(items: T[], nextItem: T) {
-  const existingIndex = items.findIndex((item) => item.id === nextItem.id)
-  if (existingIndex === -1) return [nextItem, ...items]
-  const clone = [...items]
-  clone[existingIndex] = nextItem
-  return clone
+function upsertAgentCard(items: AgentCard[], next: AgentCard) {
+  const i = items.findIndex((x) => x.agent.id === next.agent.id)
+  if (i === -1) return [next, ...items]
+  const c = [...items]; c[i] = next; return c
 }
 
-function upsertAgentCard(items: AgentCard[], nextItem: AgentCard) {
-  const existingIndex = items.findIndex((item) => item.agent.id === nextItem.agent.id)
-  if (existingIndex === -1) return [nextItem, ...items]
-  const clone = [...items]
-  clone[existingIndex] = nextItem
-  return clone
-}
+// ===== Pixel Art Characters =====
 
-function StatCard({ label, value, detail }: { label: string; value: number | string; detail?: string }) {
+function PixelChar({ color, status, label, big }: { color: string; status?: string; label?: string; big?: boolean }) {
+  const dot = status ? STATUS_DOT[status] ?? '#555' : undefined
+  const sz = big ? 1.3 : 1
   return (
-    <article className="panel stat-card">
-      <span className="eyebrow">{label}</span>
-      <strong>{value}</strong>
-      {detail ? <p>{detail}</p> : null}
-    </article>
-  )
-}
-
-function AgentDesk({ card }: { card: AgentCard }) {
-  const accent = statusTone[card.agent.status] ?? 'var(--status-offline)'
-
-  return (
-    <article className="agent-card panel" style={{ ['--accent' as string]: accent }}>
-      <div className="agent-card__header">
-        <div>
-          <h3>{card.agent.name}</h3>
-          <p>{card.agent.role ?? card.agent.type}</p>
-        </div>
-        <span className="badge">{card.agent.status}</span>
+    <div className="pchar" style={{ transform: `scale(${sz})` }}>
+      {dot && <div className="pchar__dot" style={{ background: dot }} />}
+      <div className="pchar__head" style={{ background: color }}>
+        <div className="pchar__eyes" />
       </div>
-
-      <div className="agent-card__task">
-        <span className="eyebrow">Current task</span>
-        <strong>{card.currentTask?.title ?? 'No active task'}</strong>
-        <p>{card.currentSession?.summary ?? 'Standing by for the next instruction.'}</p>
-      </div>
-
-      <dl className="agent-card__meta">
-        <div>
-          <dt>Runtime</dt>
-          <dd>{card.currentSession?.runtime ?? 'system'}</dd>
-        </div>
-        <div>
-          <dt>Model</dt>
-          <dd>{card.currentSession?.model ?? 'default'}</dd>
-        </div>
-        <div>
-          <dt>Last activity</dt>
-          <dd>{formatUtc(card.agent.lastActivityAt)}</dd>
-        </div>
-      </dl>
-    </article>
-  )
-}
-
-function RoomSection({ room, cards }: { room: Room; cards: AgentCard[] }) {
-  return (
-    <section className="room-section panel">
-      <div className="section-head">
-        <div>
-          <span className="eyebrow">Office zone</span>
-          <h2>{room.name}</h2>
-        </div>
-        <span className="badge badge--ghost">{room.kind}</span>
-      </div>
-      <div className="agent-grid">
-        {cards.length ? cards.map((card) => <AgentDesk key={card.agent.id} card={card} />) : <p className="muted">No agents placed in this room yet.</p>}
-      </div>
-    </section>
-  )
-}
-
-function TaskColumn({ title, items, onRetry, onMarkDone }: { title: string; items: Task[]; onRetry: (id: string) => void; onMarkDone: (id: string) => void }) {
-  return (
-    <section className="task-column panel panel--soft">
-      <div className="section-head compact">
-        <h3>{title}</h3>
-        <span className="badge badge--ghost">{items.length}</span>
-      </div>
-      <div className="stack">
-        {items.length ? (
-          items.map((task) => (
-            <article key={task.id} className="task-item">
-              <div>
-                <strong>{task.title}</strong>
-                <p>{task.description ?? 'No description yet.'}</p>
-              </div>
-              <div className="task-item__meta">
-                <span className="priority-dot" style={{ ['--priority' as string]: priorityTone[task.priority] ?? 'var(--priority-normal)' }} />
-                <span>{task.priority}</span>
-                <span>{task.status}</span>
-              </div>
-              <div className="task-item__actions">
-                {(task.status === 'blocked' || task.status === 'failed') && (
-                  <button className="action-btn" onClick={() => onRetry(task.id)}>Retry</button>
-                )}
-                {task.status !== 'done' && (
-                  <button className="action-btn" onClick={() => onMarkDone(task.id)}>Mark Done</button>
-                )}
-              </div>
-            </article>
-          ))
-        ) : (
-          <p className="muted">Nothing here.</p>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function EventFeed({ items }: { items: Event[] }) {
-  return (
-    <div className="stack">
-      {items.map((event) => (
-        <article key={event.id} className="event-row" data-severity={event.severity}>
-          <span className="eyebrow event-kind">{event.kind}</span>
-          <p>{event.message}</p>
-          <time>{formatUtc(event.ts)}</time>
-        </article>
-      ))}
+      <div className="pchar__body" style={{ background: color }} />
+      {label && <span className="pchar__label">{label}</span>}
     </div>
   )
 }
 
-function SessionList({ cards, onMessage, onStop }: { cards: AgentCard[]; onMessage: (id: string) => void; onStop: (id: string) => void }) {
-  const activeCards = cards.filter((card) => card.currentSession)
+function PixelDesk() {
+  return (
+    <div className="pdesk">
+      <div className="pdesk__monitor"><div className="pdesk__screen" /></div>
+      <div className="pdesk__surface" />
+      <div className="pdesk__legs" />
+    </div>
+  )
+}
+
+// ===== Office Zone Components =====
+
+function ZoneLabel({ text, icon }: { text: string; icon: string }) {
+  return <div className="zone-label"><span>{icon}</span> {text}</div>
+}
+
+function WorkingZone({ agents, onAgentClick }: { agents: AgentCard[]; onAgentClick: (c: AgentCard) => void }) {
+  return (
+    <div className="zone zone--working">
+      <ZoneLabel text="Working" icon="💻" />
+      <div className="zone__floor">
+        {/* Windows */}
+        <div className="zone-windows">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="zone-window" />)}
+        </div>
+        <div className="zone__agents">
+          {agents.map((card, i) => (
+            <div key={card.agent.id} className="agent-at-desk" onClick={() => onAgentClick(card)} title={card.currentTask?.title ?? card.agent.name}>
+              <PixelChar color={agentColor(i)} status={card.agent.status} label={card.agent.name.split(' ')[0]} />
+              <PixelDesk />
+            </div>
+          ))}
+          {agents.length === 0 && <p className="zone-empty">No one working</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RestZone({ agents, onAgentClick }: { agents: AgentCard[]; onAgentClick: (c: AgentCard) => void }) {
+  return (
+    <div className="zone zone--rest">
+      <ZoneLabel text="Lounge" icon="☕" />
+      <div className="zone__floor">
+        {/* Couch */}
+        <div className="pixel-couch" />
+        <div className="zone__agents">
+          {agents.map((card, i) => (
+            <div key={card.agent.id} className="agent-standing" onClick={() => onAgentClick(card)} title={card.agent.name}>
+              <PixelChar color={agentColor(i + 3)} status={card.agent.status} label={card.agent.name.split(' ')[0]} />
+            </div>
+          ))}
+          {agents.length === 0 && <p className="zone-empty">Lounge is empty</p>}
+        </div>
+        {/* Decorations */}
+        <div className="rest-decor">
+          <div className="pixel-plant" />
+          <div className="pixel-cooler2" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MeetingZone({ agents, onAgentClick }: { agents: AgentCard[]; onAgentClick: (c: AgentCard) => void }) {
+  // Atlas review zone
+  const atlas = agents.find((c) => c.agent.name.toLowerCase().includes('atlas'))
+  const others = agents.filter((c) => c.agent.name.toLowerCase() !== 'atlas')
 
   return (
-    <div className="stack">
-      {activeCards.length ? (
-        activeCards.map((card) => (
-          <article key={card.currentSession?.id} className="session-item">
-            <div>
-              <strong>{card.currentSession?.label}</strong>
-              <p>{card.currentSession?.summary}</p>
+    <div className="zone zone--meeting">
+      <ZoneLabel text="Review Room — Atlas" icon="🧭" />
+      <div className="zone__floor">
+        <div className="meeting-table">
+          <div className="meeting-table__surface" />
+          <div className="meeting-table__chairs">
+            {atlas && (
+              <div className="agent-standing agent-standing--lead" onClick={() => onAgentClick(atlas)} title="Atlas — Project Manager">
+                <PixelChar color="#f0a030" status={atlas.agent.status} label="Atlas" big />
+              </div>
+            )}
+            {!atlas && <div className="agent-standing"><PixelChar color="#f0a030" status="offline" label="Atlas" /></div>}
+            {others.map((card, i) => (
+              <div key={card.agent.id} className="agent-standing" onClick={() => onAgentClick(card)} title={card.agent.name}>
+                <PixelChar color={agentColor(i + 5)} status={card.agent.status} label={card.agent.name.split(' ')[0]} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="meeting-decor">
+          <div className="pixel-whiteboard" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type ChatBubble = { id: string; speaker: string; text: string; color: string; expiresAt: number }
+type ChatLog = { id: string; speaker: string; text: string; color: string; ts: number }
+
+function GatherZone({ agents, apiBaseUrl }: {
+  agents: AgentCard[]
+  apiBaseUrl: string
+}) {
+  const [bubbles, setBubbles] = useState<ChatBubble[]>([])
+  const [chatLog, setChatLog] = useState<ChatLog[]>([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+  const [repliesLeft, setRepliesLeft] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const logRef = useRef<HTMLDivElement>(null)
+
+  // Auto-expire bubbles
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setBubbles((prev) => prev.filter((b) => b.expiresAt > Date.now()))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // Scroll log to bottom
+  useEffect(() => {
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
+  }, [chatLog])
+
+  const addBubble = useCallback((speaker: string, text: string, color: string) => {
+    const truncated = text.length > 100 ? text.slice(0, 97) + '...' : text
+    setBubbles((prev) => [...prev, {
+      id: `b_${Date.now()}_${Math.random()}`,
+      speaker, text: truncated, color,
+      expiresAt: Date.now() + 10000,
+    }].slice(-15))
+  }, [])
+
+  const addLog = useCallback((speaker: string, text: string, color: string) => {
+    setChatLog((prev) => [...prev, {
+      id: `l_${Date.now()}_${Math.random()}`,
+      speaker, text, color, ts: Date.now(),
+    }].slice(-50))
+  }, [])
+
+  // Get unique agent IDs for broadcast
+  const agentIds = agents.map((c) => {
+    // Try to match to a chat agent id (lowercase first word)
+    const name = c.agent.name.split(' ')[0].toLowerCase()
+    return { card: c, chatId: name }
+  })
+
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || sending) return
+    const text = input.trim()
+    setInput('')
+    setSending(true)
+
+    // Master bubble + log
+    addBubble('Master', text, '#ffd700')
+    addLog('Master', text, '#ffd700')
+
+    // Broadcast: send to all agents in parallel
+    const targets = agentIds.length > 0 ? agentIds : [{ card: null, chatId: 'anthropic' }]
+    setRepliesLeft(targets.length)
+
+    const promises = targets.map(async ({ card, chatId }) => {
+      try {
+        const result = await sendChatMessage(apiBaseUrl, chatId, text)
+        const name = card?.agent.name.split(' ')[0] ?? chatId
+        const idx = agents.findIndex((a) => a.agent.id === card?.agent.id)
+        const color = agentColor(idx >= 0 ? idx : 0)
+        addBubble(name, result.reply, color)
+        addLog(name, result.reply, color)
+      } catch {
+        const name = card?.agent.name.split(' ')[0] ?? chatId
+        addLog(name, '(failed to respond)', '#e05050')
+      } finally {
+        setRepliesLeft((n) => n - 1)
+      }
+    })
+
+    await Promise.allSettled(promises)
+    setSending(false)
+    inputRef.current?.focus()
+  }, [input, sending, agentIds, apiBaseUrl, agents, addBubble, addLog])
+
+  const getBubble = (name: string) => bubbles.filter((b) => b.speaker === name).slice(-1)[0]
+
+  return (
+    <div className="zone zone--gather zone--gather-full">
+      <ZoneLabel text="Gathering Hall — Team Chat" icon="🏛️" />
+      <div className="gather-layout">
+        {/* Left: character floor */}
+        <div className="gather-floor-area">
+          <div className="gather-ring">
+            {/* Master */}
+            <div className="gather-char" onClick={() => inputRef.current?.focus()}>
+              {getBubble('Master') && (
+                <div className="speech-bubble" style={{ borderColor: '#ffd700' }}>{getBubble('Master')!.text}</div>
+              )}
+              <div className="agent-standing agent-standing--master">
+                <PixelChar color="#ffd700" label="Master" big />
+                <div className="master-crown">👑</div>
+              </div>
             </div>
-            <div className="session-item__meta">
-              <span>{card.currentSession?.runtime}</span>
-              <span>{card.currentSession?.model ?? 'default'}</span>
-              <span>{card.currentSession?.state}</span>
-            </div>
-            <div className="session-item__actions">
-              <button className="action-btn" onClick={() => onMessage(card.currentSession!.id)}>Message</button>
-              <button className="action-btn action-btn--warn" onClick={() => onStop(card.currentSession!.id)}>Stop</button>
-            </div>
-          </article>
-        ))
+
+            {/* Agents */}
+            {agents.map((card, i) => {
+              const name = card.agent.name.split(' ')[0]
+              const bubble = getBubble(name)
+              return (
+                <div key={card.agent.id} className="gather-char">
+                  {bubble && (
+                    <div className="speech-bubble" style={{ borderColor: agentColor(i) }}>{bubble.text}</div>
+                  )}
+                  <div className="agent-standing" title={name}>
+                    <PixelChar color={agentColor(i)} status={card.agent.status} label={name} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {/* Decorations */}
+          <div className="gather-decor">
+            <div className="pixel-tree-sm" /><div className="pixel-fountain" /><div className="pixel-tree-sm" />
+          </div>
+        </div>
+
+        {/* Right: chat log */}
+        <div className="gather-chatlog">
+          <div className="gather-chatlog__header">Team Chat</div>
+          <div className="gather-chatlog__messages" ref={logRef}>
+            {chatLog.length === 0 && <p className="gather-chatlog__empty">Send a message to talk to all agents at once</p>}
+            {chatLog.map((entry) => (
+              <div key={entry.id} className="gather-chatlog__msg">
+                <strong style={{ color: entry.color }}>{entry.speaker}</strong>
+                <span>{entry.text}</span>
+              </div>
+            ))}
+            {sending && <div className="gather-chatlog__msg gather-chatlog__msg--pending"><em>Waiting for {repliesLeft} {repliesLeft === 1 ? 'reply' : 'replies'}...</em></div>}
+          </div>
+          <form className="gather-chat__form" onSubmit={(e) => { e.preventDefault(); handleSend() }}>
+            <input
+              ref={inputRef}
+              className="gather-chat__input"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={sending ? `Waiting for ${repliesLeft} replies...` : 'Message all agents...'}
+              disabled={sending}
+            />
+            <button type="submit" className="gather-chat__send" disabled={sending || !input.trim()}>
+              {sending ? '...' : '↵'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ===== Office Floor =====
+
+function OfficeFloor({ agentCards, onAgentClick, apiBaseUrl }: {
+  agentCards: AgentCard[]
+  onAgentClick: (c: AgentCard) => void
+  apiBaseUrl: string
+}) {
+  const working = agentCards.filter((c) => c.agent.status === 'working' || c.agent.status === 'blocked')
+  const idle = agentCards.filter((c) => c.agent.status === 'idle' || c.agent.status === 'offline')
+  const waiting = agentCards.filter((c) => c.agent.status === 'waiting')
+
+  return (
+    <div className="office-floor">
+      <div className="office-grid">
+        <div className="office-row office-row--top">
+          <WorkingZone agents={working} onAgentClick={onAgentClick} />
+          <MeetingZone agents={waiting} onAgentClick={onAgentClick} />
+          <RestZone agents={idle} onAgentClick={onAgentClick} />
+        </div>
+        <GatherZone agents={agentCards} apiBaseUrl={apiBaseUrl} />
+      </div>
+    </div>
+  )
+}
+
+
+function InfraPanel({ overview, lastMessageAt }: { overview: OverviewResponse; lastMessageAt: string | null }) {
+  return (
+    <div className="side-panel-content">
+      <div className="side-panel-header"><h2>Infrastructure</h2></div>
+      <div className="infra-grid">
+        {[
+          ['Backend', overview.health.backendStatus, overview.health.backendStatus],
+          ['Gateway', overview.health.gatewayStatus, overview.health.gatewayStatus],
+          ['Nodes', String(overview.health.nodesOnline), undefined],
+          ['WebSocket', overview.health.websocketReady ? 'Connected' : 'Reconnecting', overview.health.websocketReady ? 'healthy' : 'degraded'],
+          ['Last sync', formatTimeAgo(overview.health.lastSyncAt || lastMessageAt), undefined],
+        ].map(([label, value, status]) => (
+          <div key={label} className="infra-item"><span className="infra-label">{label}</span><span className="infra-value" data-status={status}>{value}</span></div>
+        ))}
+      </div>
+      <div className="side-panel-header" style={{ marginTop: 20 }}><h2>Stats</h2></div>
+      <div className="infra-grid">
+        {[['Agents', overview.stats.activeAgents], ['Sessions', overview.stats.activeSessions], ['Queued', overview.stats.queuedTasks], ['In progress', overview.stats.tasksInProgress], ['Blocked', overview.stats.blockedTasks]].map(([l, v]) => (
+          <div key={String(l)} className="infra-item"><span className="infra-label">{l}</span><span className="infra-value">{v}</span></div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AgentDetail({ card, onClose, onChat }: { card: AgentCard; onClose: () => void; onChat: () => void }) {
+  return (
+    <div className="agent-detail-overlay" onClick={onClose}>
+      <div className="agent-detail" onClick={(e) => e.stopPropagation()}>
+        <div className="agent-detail__header"><h2>{card.agent.name}</h2><button onClick={onClose} className="agent-detail__close">✕</button></div>
+        <div className="agent-detail__body">
+          {[['Status', card.agent.status], ['Role', card.agent.role ?? card.agent.type], ['Runtime', card.currentSession?.runtime ?? 'none'],
+            ['Model', card.currentSession?.model ?? 'default'], ['Task', card.currentTask?.title ?? 'None'], ['Session', card.currentSession?.label ?? 'None'],
+            ['Last activity', formatTimeAgo(card.agent.lastActivityAt)],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="agent-detail__row"><span>{label}</span><strong>{value}</strong></div>
+          ))}
+        </div>
+        <div className="agent-detail__footer">
+          <button className="action-btn action-btn--primary" onClick={onChat}>Chat with {card.agent.name.split(' ')[0]}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LiveActivity({ events }: { events: Event[] }) {
+  const recent = events.slice(0, 8)
+  return (
+    <div className="live-activity">
+      <div className="live-activity__header"><span>Live Activity</span><span className="live-activity__badge">Last hour</span></div>
+      {recent.length === 0 ? (
+        <div className="live-activity__empty"><p>No recent activity</p><p className="muted-sm">Events will appear here</p></div>
       ) : (
-        <p className="muted">No active sessions.</p>
+        <div className="live-activity__list">
+          {recent.map((evt) => (
+            <div key={evt.id} className="live-activity__item">
+              <span className="live-activity__dot" data-severity={evt.severity} /><span>{evt.message}</span><time>{formatTimeAgo(evt.ts)}</time>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
 }
 
-function CreateTaskForm({ onSubmit, onCancel }: { onSubmit: (input: { title: string; description?: string; priority?: string }) => void; onCancel: () => void }) {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState('normal')
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!title.trim()) return
-    onSubmit({ title: title.trim(), description: description.trim() || undefined, priority })
-    setTitle('')
-    setDescription('')
-    setPriority('normal')
-  }
-
-  return (
-    <form className="create-task-form" onSubmit={handleSubmit}>
-      <input
-        type="text"
-        placeholder="Task title"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        required
-        autoFocus
-      />
-      <textarea
-        placeholder="Description (optional)"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        rows={2}
-      />
-      <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-        <option value="low">Low</option>
-        <option value="normal">Normal</option>
-        <option value="high">High</option>
-        <option value="urgent">Urgent</option>
-      </select>
-      <div className="create-task-form__actions">
-        <button type="submit" className="action-btn action-btn--primary">Create</button>
-        <button type="button" className="action-btn" onClick={onCancel}>Cancel</button>
-      </div>
-    </form>
-  )
-}
+// ===== Main Dashboard =====
 
 export function DashboardLive(props: DashboardProps) {
   const [state, setState] = useState<DashboardState>({
-    overview: props.overview,
-    agentCards: props.agentCards,
-    tasks: props.tasks,
-    events: props.events,
-    rooms: props.rooms,
-    sessions: props.agentCards.map((card) => card.currentSession).filter(Boolean) as Session[],
+    overview: props.overview, agentCards: props.agentCards, tasks: props.tasks,
+    events: props.events, rooms: props.rooms,
+    sessions: props.agentCards.map((c) => c.currentSession).filter(Boolean) as Session[],
   })
   const [lastMessageAt, setLastMessageAt] = useState<string | null>(props.overview.health.lastSyncAt ?? null)
-  const [activeSection, setActiveSection] = useState('section-overview')
-  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [activePage, setActivePage] = useState<NavPage>('office')
   const [chatOpen, setChatOpen] = useState(false)
-  const observerRef = useRef<IntersectionObserver | null>(null)
-  console.log(state, 'here')
-  // WebSocket connection
+  const [selectedAgent, setSelectedAgent] = useState<AgentCard | null>(null)
+  const [chatAgents, setChatAgents] = useState<ChatAgent[]>([])
+
+  // Load chat agents for Kanban assignment
   useEffect(() => {
-    let closedByEffect = false
-    const socket = new WebSocket(props.websocketUrl)
+    fetchChatAgents(props.apiBaseUrl).then(setChatAgents).catch(() => {})
+  }, [props.apiBaseUrl])
 
-    socket.addEventListener('message', (event) => {
+  // WebSocket
+  useEffect(() => {
+    let closed = false
+    const ws = new WebSocket(props.websocketUrl)
+    ws.addEventListener('message', (e) => {
       try {
-        const message = JSON.parse(event.data) as MissionControlWsEvent
-        setLastMessageAt(message.ts)
-
-        if (message.type === 'overview.snapshot') {
-          const payload = message.payload as {
-            overview: OverviewResponse
-            agents: AgentCard[]
-            tasks: Task[]
-            sessions: Session[]
-            events: Event[]
-            rooms: { rooms: Room[] }
-          }
-
-          setState({
-            overview: payload.overview,
-            agentCards: payload.agents,
-            tasks: payload.tasks,
-            events: payload.events,
-            rooms: payload.rooms.rooms,
-            sessions: payload.sessions,
-          })
-          return
+        const msg = JSON.parse(e.data) as MissionControlWsEvent
+        setLastMessageAt(msg.ts)
+        if (msg.type === 'overview.snapshot') {
+          const p = msg.payload as { overview: OverviewResponse; agents: AgentCard[]; tasks: Task[]; sessions: Session[]; events: Event[]; rooms: { rooms: Room[] } }
+          setState({ overview: p.overview, agentCards: p.agents, tasks: p.tasks, events: p.events, rooms: p.rooms.rooms, sessions: p.sessions })
+        } else if (msg.type === 'agent.updated') setState((c) => ({ ...c, agentCards: upsertAgentCard(c.agentCards, msg.payload as AgentCard) }))
+        else if (msg.type === 'task.updated') { const p = msg.payload as { task: Task }; setState((c) => ({ ...c, tasks: upsertById(c.tasks, p.task) })) }
+        else if (msg.type === 'session.updated') { const p = msg.payload as { session: Session }; setState((c) => ({ ...c, sessions: upsertById(c.sessions, p.session) })) }
+        else if (msg.type === 'event.created') { const p = msg.payload as { event: Event }; setState((c) => ({ ...c, events: upsertById(c.events, p.event).slice(0, 20) })) }
+        else if (msg.type === 'health.updated') {
+          const p = msg.payload as HealthUpdatedPayload
+          setState((c) => ({ ...c, overview: { ...c.overview, health: { ...c.overview.health, backendStatus: p.backendStatus, gatewayStatus: p.gatewayStatus, nodesOnline: p.nodesOnline, websocketReady: true, lastSyncAt: p.lastSyncAt ?? msg.ts } } }))
         }
-
-        if (message.type === 'agent.updated') {
-          const payload = message.payload as AgentCard
-          setState((current) => ({ ...current, agentCards: upsertAgentCard(current.agentCards, payload) }))
-          return
-        }
-
-        if (message.type === 'task.updated') {
-          const payload = message.payload as { task: Task }
-          setState((current) => ({ ...current, tasks: upsertById(current.tasks, payload.task) }))
-          return
-        }
-
-        if (message.type === 'session.updated') {
-          const payload = message.payload as { session: Session }
-          setState((current) => ({ ...current, sessions: upsertById(current.sessions, payload.session) }))
-          return
-        }
-
-        if (message.type === 'event.created') {
-          const payload = message.payload as { event: Event }
-          setState((current) => ({ ...current, events: upsertById(current.events, payload.event).slice(0, 12) }))
-          return
-        }
-
-        if (message.type === 'health.updated') {
-          const payload = message.payload as HealthUpdatedPayload
-          setState((current) => ({
-            ...current,
-            overview: {
-              ...current.overview,
-              health: {
-                ...current.overview.health,
-                backendStatus: payload.backendStatus,
-                gatewayStatus: payload.gatewayStatus,
-                nodesOnline: payload.nodesOnline,
-                websocketReady: true,
-                lastSyncAt: payload.lastSyncAt ?? message.ts,
-              },
-            },
-          }))
-        }
-      } catch {
-        // ignore malformed frames for now
-      }
+      } catch {}
     })
-
-    socket.addEventListener('close', () => {
-      if (!closedByEffect) {
-        setState((current) => ({
-          ...current,
-          overview: {
-            ...current.overview,
-            health: { ...current.overview.health, websocketReady: false },
-          },
-        }))
-      }
-    })
-
-    return () => {
-      closedByEffect = true
-      socket.close()
-    }
+    ws.addEventListener('close', () => { if (!closed) setState((c) => ({ ...c, overview: { ...c.overview, health: { ...c.overview.health, websocketReady: false } } })) })
+    return () => { closed = true; ws.close() }
   }, [props.websocketUrl])
 
-  // IntersectionObserver for active nav section
-  useEffect(() => {
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActiveSection(entry.target.id)
-          }
-        }
-      },
-      { rootMargin: '-20% 0px -60% 0px', threshold: 0 }
-    )
+  const handleOpenChat = useCallback(() => setChatOpen(true), [])
 
-    for (const section of NAV_SECTIONS) {
-      const el = document.getElementById(section.id)
-      if (el) observerRef.current.observe(el)
-    }
+  const handleAgentClick = useCallback((card: AgentCard) => setSelectedAgent(card), [])
+  const handleAgentChat = useCallback(() => { setSelectedAgent(null); setChatOpen(true) }, [])
 
-    return () => observerRef.current?.disconnect()
-  }, [])
-
-  const scrollTo = useCallback((id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [])
-
-  // Action handlers
-  const handleRetryTask = useCallback(async (taskId: string) => {
-    try {
-      await apiRetryTask(props.apiBaseUrl, taskId)
-    } catch (err) {
-      console.error('Failed to retry task:', err)
-    }
-  }, [props.apiBaseUrl])
-
-  const handleMarkDone = useCallback(async (taskId: string) => {
-    try {
-      await apiUpdateTask(props.apiBaseUrl, taskId, { status: 'done' })
-    } catch (err) {
-      console.error('Failed to mark task done:', err)
-    }
-  }, [props.apiBaseUrl])
-
-  const handleSendMessage = useCallback(async (sessionId: string) => {
-    const message = window.prompt('Message to send:')
-    if (!message) return
-    try {
-      await apiSendMessage(props.apiBaseUrl, sessionId, message)
-    } catch (err) {
-      console.error('Failed to send message:', err)
-    }
-  }, [props.apiBaseUrl])
-
-  const handleStopSession = useCallback(async (sessionId: string) => {
-    if (!window.confirm('Stop this session?')) return
-    try {
-      await apiStopSession(props.apiBaseUrl, sessionId)
-    } catch (err) {
-      console.error('Failed to stop session:', err)
-    }
-  }, [props.apiBaseUrl])
-
-  const handleCreateTask = useCallback(async (input: { title: string; description?: string; priority?: string }) => {
-    try {
-      await apiCreateTask(props.apiBaseUrl, input)
-      setShowCreateForm(false)
-    } catch (err) {
-      console.error('Failed to create task:', err)
-    }
-  }, [props.apiBaseUrl])
-
-  const queued = useMemo(() => state.tasks.filter((task) => task.status === 'queued'), [state.tasks])
-  const inProgress = useMemo(() => state.tasks.filter((task) => task.status === 'in_progress'), [state.tasks])
-  const blocked = useMemo(() => state.tasks.filter((task) => task.status === 'blocked' || task.status === 'waiting'), [state.tasks])
+  const NAV_ITEMS: { id: NavPage; label: string; icon: string }[] = [
+    { id: 'office', label: 'Office', icon: '🏢' }, { id: 'tasks', label: 'Tasks', icon: '📋' },
+    { id: 'skills', label: 'Agents', icon: '🧩' }, { id: 'usage', label: 'Usage', icon: '📊' },
+    { id: 'cron', label: 'Cron', icon: '⏰' }, { id: 'memory', label: 'Memory', icon: '🧠' },
+    { id: 'activity', label: 'Activity', icon: '📡' }, { id: 'channels', label: 'Channels', icon: '📱' },
+    { id: 'doctor', label: 'Doctor', icon: '🩺' }, { id: 'infra', label: 'Infra', icon: '🔧' },
+  ]
 
   return (
-    <main className="page-shell">
-      <header className="topbar panel">
-        <div>
-          <span className="eyebrow">Operational cockpit</span>
-          <h1>OpenClaw Mission Control</h1>
-          <p>Overview, Office, Sessions, Tasks, Events, and infra health in one live room.</p>
-        </div>
-        <nav className="topbar__nav" aria-label="Primary navigation">
-          {NAV_SECTIONS.map((item) => (
-            <button
-              key={item.id}
-              className={`pill${activeSection === item.id ? ' pill--active' : ''}`}
-              onClick={() => scrollTo(item.id)}
-            >
-              {item.label}
+    <div className="mc-layout">
+      <aside className="mc-sidebar">
+        <div className="mc-sidebar__brand"><span className="mc-sidebar__logo">🦞</span><span className="mc-sidebar__title">Mission Control</span></div>
+        <nav className="mc-sidebar__nav">
+          {NAV_ITEMS.map((item) => (
+            <button key={item.id} className={`mc-nav-item${activePage === item.id ? ' mc-nav-item--active' : ''}`} onClick={() => setActivePage(item.id)}>
+              <span className="mc-nav-item__icon">{item.icon}</span><span>{item.label}</span>
             </button>
           ))}
-          <button className="pill pill--chat" onClick={() => setChatOpen(true)}>
-            Chat
-          </button>
         </nav>
-      </header>
+        <div className="mc-sidebar__bottom">
+          <button className="mc-nav-item mc-nav-item--chat" onClick={handleOpenChat}><span className="mc-nav-item__icon">💬</span><span>Chat</span></button>
+          <div className="mc-sidebar__status"><span className={`mc-status-dot${state.overview.health.websocketReady ? ' mc-status-dot--live' : ''}`} /><span>{state.overview.health.websocketReady ? 'Connected' : 'Offline'}</span></div>
+        </div>
+      </aside>
 
-      <section id="section-overview" className="stats-grid">
-        <StatCard label="Active agents" value={state.overview.stats.activeAgents} detail="Agents currently visible in the office." />
-        <StatCard label="Active sessions" value={state.overview.stats.activeSessions} detail="Running contexts across main, subagent, and ACP flows." />
-        <StatCard label="Queued tasks" value={state.overview.stats.queuedTasks} detail="Work ready for assignment." />
-        <StatCard label="In progress" value={state.overview.stats.tasksInProgress} detail="Tasks being actively executed." />
-        <StatCard label="Blocked" value={state.overview.stats.blockedTasks} detail="Needs intervention or missing context." />
-        <StatCard label="Websocket" value={state.overview.health.websocketReady ? 'Ready' : 'Retrying'} detail={`Last sync ${formatUtc(state.overview.health.lastSyncAt || lastMessageAt)}`} />
-      </section>
-
-      <section className="hero-grid">
-        <section id="section-office" className="panel overview-panel">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Mission status</span>
-              <h2>Office View</h2>
-            </div>
-            <span className="badge badge--ghost">live layout</span>
+      <main className="mc-main">
+        <header className="mc-topbar">
+          <button className="mc-start-chat" onClick={handleOpenChat}>+ Start Chat</button>
+          <div className="mc-stats-bar">
+            <span>{state.overview.stats.activeAgents} agents</span><span>{state.overview.stats.activeSessions} sessions</span>
+            <span>{state.overview.stats.queuedTasks} queued</span><span>{state.overview.stats.blockedTasks} blocked</span>
           </div>
-          <div className="room-stack">
-            {state.rooms.map((room) => (
-              <RoomSection key={room.id} room={room} cards={state.agentCards.filter((card) => card.room?.id === room.id || card.agent.roomId === room.id)} />
-            ))}
-          </div>
-        </section>
+        </header>
 
-        <aside className="sidebar-stack">
-          <RealtimeStatus
-            websocketUrl={props.websocketUrl}
-            initialReady={state.overview.health.websocketReady}
-            initialLastSyncAt={state.overview.health.lastSyncAt}
-          />
+        {activePage === 'office' && <OfficeFloor agentCards={state.agentCards} onAgentClick={handleAgentClick} apiBaseUrl={props.apiBaseUrl} />}
+        {activePage === 'tasks' && <div className="mc-center-panel"><KanbanBoard tasks={state.tasks} agents={state.agentCards} chatAgents={chatAgents} apiBaseUrl={props.apiBaseUrl} /></div>}
+        {activePage === 'infra' && <div className="mc-center-panel"><InfraPanel overview={state.overview} lastMessageAt={lastMessageAt} /></div>}
+        {activePage === 'skills' && <div className="mc-center-panel"><SkillsPage apiBaseUrl={props.apiBaseUrl} /></div>}
+        {activePage === 'usage' && <div className="mc-center-panel"><UsagePage apiBaseUrl={props.apiBaseUrl} /></div>}
+        {activePage === 'cron' && <div className="mc-center-panel"><CronPage apiBaseUrl={props.apiBaseUrl} /></div>}
+        {activePage === 'doctor' && <div className="mc-center-panel"><DoctorPage apiBaseUrl={props.apiBaseUrl} /></div>}
+        {activePage === 'activity' && <div className="mc-center-panel"><ActivityPage apiBaseUrl={props.apiBaseUrl} events={state.events} /></div>}
+        {activePage === 'memory' && <div className="mc-center-panel"><MemoryPage apiBaseUrl={props.apiBaseUrl} /></div>}
+        {activePage === 'channels' && <div className="mc-center-panel"><ChannelsPage apiBaseUrl={props.apiBaseUrl} /></div>}
+      </main>
 
-          <section className="panel attention-panel">
-            <div className="section-head compact">
-              <h2>Attention needed</h2>
-              <span className="badge">alerts</span>
-            </div>
-            <div className="stack">
-              {state.overview.alerts.length ? (
-                state.overview.alerts.map((alert) => (
-                  <article key={alert.id} className="alert-item">
-                    <strong>{alert.kind}</strong>
-                    <p>{alert.message}</p>
-                  </article>
-                ))
-              ) : (
-                <p className="muted">No active alerts.</p>
-              )}
-            </div>
-          </section>
+      <aside className="mc-activity"><LiveActivity events={state.events} /></aside>
 
-          <section id="section-infra" className="panel health-panel">
-            <div className="section-head compact">
-              <h2>Infra health</h2>
-              <span className="badge badge--ghost">ops</span>
-            </div>
-            <dl className="health-grid">
-              <div>
-                <dt>Backend</dt>
-                <dd>{state.overview.health.backendStatus}</dd>
-              </div>
-              <div>
-                <dt>Gateway</dt>
-                <dd>{state.overview.health.gatewayStatus}</dd>
-              </div>
-              <div>
-                <dt>Nodes online</dt>
-                <dd>{state.overview.health.nodesOnline}</dd>
-              </div>
-              <div>
-                <dt>Realtime</dt>
-                <dd>{state.overview.health.websocketReady ? 'ready' : 'reconnecting'}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section id="section-events" className="panel events-panel">
-            <div className="section-head compact">
-              <h2>Recent events</h2>
-              <span className="badge badge--ghost">timeline</span>
-            </div>
-            <EventFeed items={state.events} />
-          </section>
-        </aside>
-      </section>
-
-      <section className="bottom-grid">
-        <section id="section-sessions" className="panel">
-          <div className="section-head compact">
-            <div>
-              <span className="eyebrow">Active contexts</span>
-              <h2>Sessions</h2>
-            </div>
-            <span className="badge badge--ghost">runtime view</span>
-          </div>
-          <SessionList cards={state.agentCards} onMessage={handleSendMessage} onStop={handleStopSession} />
-        </section>
-
-        <section id="section-tasks" className="panel">
-          <div className="section-head compact">
-            <div>
-              <span className="eyebrow">Work in motion</span>
-              <h2>Task board</h2>
-            </div>
-            <button className="action-btn action-btn--primary" onClick={() => setShowCreateForm((v) => !v)}>
-              {showCreateForm ? 'Cancel' : 'New Task'}
-            </button>
-          </div>
-          {showCreateForm && (
-            <CreateTaskForm onSubmit={handleCreateTask} onCancel={() => setShowCreateForm(false)} />
-          )}
-          <div className="task-board">
-            <TaskColumn title="Queued" items={queued} onRetry={handleRetryTask} onMarkDone={handleMarkDone} />
-            <TaskColumn title="In progress" items={inProgress} onRetry={handleRetryTask} onMarkDone={handleMarkDone} />
-            <TaskColumn title="Blocked / Waiting" items={blocked} onRetry={handleRetryTask} onMarkDone={handleMarkDone} />
-          </div>
-        </section>
-      </section>
-
+      {selectedAgent && <AgentDetail card={selectedAgent} onClose={() => setSelectedAgent(null)} onChat={handleAgentChat} />}
       <ChatDrawer apiBaseUrl={props.apiBaseUrl} open={chatOpen} onClose={() => setChatOpen(false)} />
-    </main>
+    </div>
   )
 }

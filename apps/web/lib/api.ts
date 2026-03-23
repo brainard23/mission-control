@@ -160,10 +160,13 @@ export async function fetchChatHistory(apiBaseUrl: string, agentId: string): Pro
   return payload.data.messages
 }
 
-export async function sendChatMessage(apiBaseUrl: string, agentId: string, message: string, sessionId?: string): Promise<ChatReply> {
-  return mutateJson<ChatReply>(apiBaseUrl, `/api/v1/chat/${agentId}/message`, 'POST', { message, sessionId })
+export async function sendChatMessage(apiBaseUrl: string, agentId: string, message: string, sessionId?: string, delivery?: { deliver: boolean; channel?: string; replyTo?: string }): Promise<ChatReply> {
+  return mutateJson<ChatReply>(apiBaseUrl, `/api/v1/chat/${agentId}/message`, 'POST', { message, sessionId, ...delivery })
 }
 
 export async function clearChat(apiBaseUrl: string, agentId: string) {
   return mutateJson(apiBaseUrl, `/api/v1/chat/${agentId}/history`, 'POST')
 }
+
+// --- Skills & Agent Details ---
+

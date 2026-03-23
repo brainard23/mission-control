@@ -265,26 +265,38 @@ async function fetchRuntimeSnapshot() {
   const sessions = []
   const placements = []
 
+  // Group sessions by real agentId to avoid duplicates
+  const agentSessionMap = new Map()
   activeSessions
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
-    .forEach((session, index) => {
-      const agentId = `agent_${slug(session.key)}`
+    .forEach((session) => {
+      const realAgentId = session.agentId || slug(session.key.split(':')[1] || session.key)
+      const agentId = `agent_${slug(realAgentId)}`
       const mappedSession = mapSession(session, agentId)
-      const mappedAgent = mapAgent(session, agentId, mappedSession.id)
-      agents.push(mappedAgent)
       sessions.push(mappedSession)
-      placements.push({
-        id: `placement_${agentId}`,
-        roomId: LIVE_ROOM_ID,
-        agentId,
-        x: index % 3,
-        y: Math.floor(index / 3),
-        w: 1,
-        h: 1,
-        zIndex: 0,
-        metadata: { generated: true },
-      })
+
+      if (!agentSessionMap.has(agentId)) {
+        agentSessionMap.set(agentId, { session, agentId, mappedSessionId: mappedSession.id })
+      }
     })
+
+  let placementIndex = 0
+  for (const [agentId, { session, mappedSessionId }] of agentSessionMap) {
+    const mappedAgent = mapAgent(session, agentId, mappedSessionId)
+    agents.push(mappedAgent)
+    placements.push({
+      id: `placement_${agentId}`,
+      roomId: LIVE_ROOM_ID,
+      agentId,
+      x: placementIndex % 3,
+      y: Math.floor(placementIndex / 3),
+      w: 1,
+      h: 1,
+      zIndex: 0,
+      metadata: { generated: true },
+    })
+    placementIndex++
+  }
 
   const lastSyncAt = new Date().toISOString()
 
