@@ -25,12 +25,15 @@ import {
 } from './schemas.js'
 import {
   clearChatHistory,
+  deleteAgent,
   getChatHistory,
   getOneAgentDetail,
   listAgentSessions,
   listAvailableAgents,
   sendAgentMessage,
   sendDirectMessage,
+  setAgentIdentity,
+  spawnAgent,
 } from '../integrations.openclaw-chat.js'
 import {
   addCronJob, disableCronJob, editCronJob, enableCronJob,
@@ -393,6 +396,40 @@ export function registerRoutes(app) {
       const result = await logoutChannel(channel, account)
       return sendJson(reply, 200, { data: { message: result } })
     } catch (error) { return sendJson(reply, 502, { error: { code: 'CHANNEL_ERROR', message: error.message } }) }
+  })
+
+  // --- Agent management (spawn / delete / identity) ---
+
+  app.post('/api/v1/openclaw/agents/spawn', async (request, reply) => {
+    try {
+      const { id, name, emoji, model } = request.body || {}
+      if (!id) return sendJson(reply, 400, { error: { code: 'BAD_REQUEST', message: 'id is required' } })
+      const result = await spawnAgent(id, { name, emoji, model })
+      return sendJson(reply, 201, { data: result })
+    } catch (error) {
+      const status = error.message?.includes('already exists') ? 409 : 502
+      return sendJson(reply, status, { error: { code: 'SPAWN_ERROR', message: error.message } })
+    }
+  })
+
+  app.delete('/api/v1/openclaw/agents/:agentId', { schema: { params: agentIdParamSchema } }, async (request, reply) => {
+    try {
+      const result = await deleteAgent(request.params.agentId)
+      return sendJson(reply, 200, { data: result })
+    } catch (error) {
+      const status = error.message?.includes('not found') ? 404 : 502
+      return sendJson(reply, status, { error: { code: 'DELETE_ERROR', message: error.message } })
+    }
+  })
+
+  app.patch('/api/v1/openclaw/agents/:agentId/identity', { schema: { params: agentIdParamSchema } }, async (request, reply) => {
+    try {
+      const { name, emoji } = request.body || {}
+      const result = await setAgentIdentity(request.params.agentId, { name, emoji })
+      return sendJson(reply, 200, { data: result })
+    } catch (error) {
+      return sendJson(reply, 502, { error: { code: 'IDENTITY_ERROR', message: error.message } })
+    }
   })
 
   // --- Direct message send (bypasses agent, sends directly to channel) ---

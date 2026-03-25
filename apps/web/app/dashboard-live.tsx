@@ -487,10 +487,20 @@ export function DashboardLive(props: DashboardProps) {
     return () => { closed = true; ws.close() }
   }, [props.websocketUrl])
 
-  const handleOpenChat = useCallback(() => setChatOpen(true), [])
+  const [chatTargetAgent, setChatTargetAgent] = useState<string | null>(null)
+
+  const handleOpenChat = useCallback((agentId?: string) => {
+    if (agentId) setChatTargetAgent(agentId)
+    setChatOpen(true)
+  }, [])
 
   const handleAgentClick = useCallback((card: AgentCard) => setSelectedAgent(card), [])
-  const handleAgentChat = useCallback(() => { setSelectedAgent(null); setChatOpen(true) }, [])
+  const handleAgentChat = useCallback(() => {
+    const agentId = selectedAgent?.agent.metadata?.providerAgentId || selectedAgent?.agent.id?.replace('agent_', '')
+    setSelectedAgent(null)
+    setChatTargetAgent(agentId || null)
+    setChatOpen(true)
+  }, [selectedAgent])
 
   const NAV_ITEMS: { id: NavPage; label: string; icon: string }[] = [
     { id: 'office', label: 'Office', icon: '🏢' }, { id: 'tasks', label: 'Tasks', icon: '📋' },
@@ -541,7 +551,7 @@ export function DashboardLive(props: DashboardProps) {
       <aside className="mc-activity"><LiveActivity events={state.events} /></aside>
 
       {selectedAgent && <AgentDetail card={selectedAgent} onClose={() => setSelectedAgent(null)} onChat={handleAgentChat} />}
-      <ChatDrawer apiBaseUrl={props.apiBaseUrl} open={chatOpen} onClose={() => setChatOpen(false)} />
+      <ChatDrawer apiBaseUrl={props.apiBaseUrl} open={chatOpen} onClose={() => { setChatOpen(false); setChatTargetAgent(null) }} defaultAgent={chatTargetAgent} />
     </div>
   )
 }

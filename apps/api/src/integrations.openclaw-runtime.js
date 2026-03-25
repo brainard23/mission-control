@@ -244,22 +244,30 @@ async function publishRuntimeRefresh(previousSnapshot, nextSnapshot) {
 const OPENCLAW_CONTAINER = process.env.OPENCLAW_CONTAINER || 'openclaw-openclaw-gateway-1'
 
 async function runOpenClawJson(args) {
-  const { stdout } = await execFileAsync('docker', ['exec', OPENCLAW_CONTAINER, 'openclaw', ...args], {
+  const { stdout } = await execFileAsync('docker', ['exec', '-e', 'NO_COLOR=1', OPENCLAW_CONTAINER, 'sh', '-c', `openclaw ${args.join(' ')}`], {
     cwd: process.cwd(),
-    timeout: 15000,
-    maxBuffer: 1024 * 1024,
+    timeout: 30000,
+    maxBuffer: 10 * 1024 * 1024,
     env: process.env,
   })
 
-  return JSON.parse(stdout)
+  // Strip any CLI banner text before the JSON
+  const trimmed = stdout.trim()
+  const i = trimmed.indexOf('{')
+  const j = trimmed.indexOf('[')
+  const start = i >= 0 && j >= 0 ? Math.min(i, j) : Math.max(i, j)
+  if (start < 0) throw new Error('No JSON found in output')
+  return JSON.parse(trimmed.slice(start))
 }
 
 async function fetchRuntimeSnapshot() {
-  const [presence, sessionsPayload] = await Promise.all([
+  const [presence, sessionsPayload, agentListRaw] = await Promise.all([
     runOpenClawJson(['system', 'presence', '--json']),
     runOpenClawJson(['sessions', '--all-agents', '--active', String(ACTIVE_WINDOW_MINUTES), '--json']),
+    runOpenClawJson(['agents', 'list', '--json']).catch(() => []),
   ])
 
+  const agentList = Array.isArray(agentListRaw) ? agentListRaw : []
   const activeSessions = Array.isArray(sessionsPayload.sessions) ? sessionsPayload.sessions : []
   const agents = []
   const sessions = []
@@ -280,10 +288,64 @@ async function fetchRuntimeSnapshot() {
       }
     })
 
+  // Build a lookup for configured agent identity names
+  const agentIdentities = new Map()
+  for (const a of agentList) {
+    agentIdentities.set(`agent_${slug(a.id)}`, {
+      name: a.identityName || a.name || titleCase(a.id),
+      emoji: a.identityEmoji || null,
+      isDefault: a.isDefault || false,
+    })
+  }
+
   let placementIndex = 0
   for (const [agentId, { session, mappedSessionId }] of agentSessionMap) {
     const mappedAgent = mapAgent(session, agentId, mappedSessionId)
+    // Override name with identity if available
+    const identity = agentIdentities.get(agentId)
+    if (identity) {
+      mappedAgent.name = identity.name
+      mappedAgent.metadata.emoji = identity.emoji
+      mappedAgent.metadata.isDefault = identity.isDefault
+    }
     agents.push(mappedAgent)
+    placements.push({
+      id: `placement_${agentId}`,
+      roomId: LIVE_ROOM_ID,
+      agentId,
+      x: placementIndex % 3,
+      y: Math.floor(placementIndex / 3),
+      w: 1,
+      h: 1,
+      zIndex: 0,
+      metadata: { generated: true },
+    })
+    placementIndex++
+  }
+
+  // Ensure ALL configured agents appear, even if they have no active sessions
+  for (const configured of agentList) {
+    const agentId = `agent_${slug(configured.id)}`
+    if (agentSessionMap.has(agentId)) continue // already present from sessions
+
+    agents.push({
+      id: agentId,
+      name: configured.name || configured.identityName || titleCase(configured.id),
+      type: 'main',
+      role: configured.isDefault ? 'Primary assistant' : 'Assistant',
+      capabilities: [configured.model].filter(Boolean),
+      status: 'idle',
+      roomId: LIVE_ROOM_ID,
+      currentSessionId: null,
+      currentTaskId: null,
+      lastActivityAt: null,
+      runtimeSource: 'openclaw',
+      metadata: {
+        providerAgentId: configured.id,
+        emoji: configured.identityEmoji || null,
+        isDefault: configured.isDefault || false,
+      },
+    })
     placements.push({
       id: `placement_${agentId}`,
       roomId: LIVE_ROOM_ID,

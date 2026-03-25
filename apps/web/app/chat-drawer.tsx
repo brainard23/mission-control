@@ -12,6 +12,7 @@ type ChatDrawerProps = {
   apiBaseUrl: string
   open: boolean
   onClose: () => void
+  defaultAgent?: string | null
 }
 
 function formatTime(ts: string) {
@@ -39,7 +40,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   )
 }
 
-export function ChatDrawer({ apiBaseUrl, open, onClose }: ChatDrawerProps) {
+export function ChatDrawer({ apiBaseUrl, open, onClose, defaultAgent }: ChatDrawerProps) {
   const [agents, setAgents] = useState<ChatAgent[]>([])
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -61,14 +62,17 @@ export function ChatDrawer({ apiBaseUrl, open, onClose }: ChatDrawerProps) {
     fetchChatAgents(apiBaseUrl)
       .then((list) => {
         setAgents(list)
-        if (!selectedAgent && list.length) {
-          const defaultAgent = list.find((a) => a.isDefault) || list[0]
-          setSelectedAgent(defaultAgent.id)
+        // If a specific agent was requested, select it
+        if (defaultAgent && list.find((a) => a.id === defaultAgent)) {
+          setSelectedAgent(defaultAgent)
+        } else if (!selectedAgent && list.length) {
+          const def = list.find((a) => a.isDefault) || list[0]
+          setSelectedAgent(def.id)
         }
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoadingAgents(false))
-  }, [open, apiBaseUrl])
+  }, [open, apiBaseUrl, defaultAgent])
 
   // Load history when agent changes
   useEffect(() => {

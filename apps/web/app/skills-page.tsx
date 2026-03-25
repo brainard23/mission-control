@@ -20,12 +20,25 @@ export function SkillsPage({ apiBaseUrl }: { apiBaseUrl: string }) {
   const [loadingAgents, setLoadingAgents] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Load agent list
-  useEffect(() => {
+  // Spawn dialog state
+  const [showSpawn, setShowSpawn] = useState(false)
+  const [spawnId, setSpawnId] = useState('')
+  const [spawnName, setSpawnName] = useState('')
+  const [spawnEmoji, setSpawnEmoji] = useState('')
+  const [spawning, setSpawning] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  const refreshAgents = useCallback(() => {
+    setLoadingAgents(true)
     fetchChatAgents(apiBaseUrl)
       .then((list) => { setAgents(list); if (list.length && !selected) setSelected(list[0].id) })
       .catch((e) => setError(e.message))
       .finally(() => setLoadingAgents(false))
+  }, [apiBaseUrl, selected])
+
+  // Load agent list
+  useEffect(() => {
+    refreshAgents()
   }, [apiBaseUrl])
 
   // Load detail when agent selected
@@ -49,11 +62,80 @@ export function SkillsPage({ apiBaseUrl }: { apiBaseUrl: string }) {
     if (selected) loadDetail(selected)
   }, [selected, loadDetail])
 
+  const handleSpawn = useCallback(async () => {
+    if (!spawnId.trim()) return
+    setSpawning(true)
+    setError(null)
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/v1/openclaw/agents/spawn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: spawnId.trim().toLowerCase(), name: spawnName.trim() || undefined, emoji: spawnEmoji.trim() || undefined }),
+      })
+      const payload = await res.json()
+      if (!res.ok) throw new Error(payload.error?.message || 'Spawn failed')
+      setShowSpawn(false)
+      setSpawnId(''); setSpawnName(''); setSpawnEmoji('')
+      refreshAgents()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Spawn failed')
+    } finally {
+      setSpawning(false)
+    }
+  }, [apiBaseUrl, spawnId, spawnName, spawnEmoji, refreshAgents])
+
+  const handleDelete = useCallback(async (agentId: string) => {
+    if (!confirm(`Delete agent "${agentId}"? This removes the agent and its workspace.`)) return
+    setDeleting(agentId)
+    setError(null)
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/v1/openclaw/agents/${agentId}`, { method: 'DELETE' })
+      const payload = await res.json()
+      if (!res.ok) throw new Error(payload.error?.message || 'Delete failed')
+      if (selected === agentId) { setSelected(null); setDetail(null) }
+      refreshAgents()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setDeleting(null)
+    }
+  }, [apiBaseUrl, selected, refreshAgents])
+
   const selectedAgent = agents.find((a) => a.id === selected)
 
   return (
     <div className="skills-page">
-      <h2>Agents & Sub-Agents</h2>
+      <div className="skills-page__header">
+        <h2>Agents & Sub-Agents</h2>
+        <button className="action-btn action-btn--primary" onClick={() => setShowSpawn(true)}>+ Spawn Agent</button>
+      </div>
+
+      {/* Spawn dialog */}
+      {showSpawn && (
+        <div className="spawn-dialog">
+          <div className="spawn-dialog__header"><h3>Spawn New Agent</h3><button className="agent-detail__close" onClick={() => setShowSpawn(false)}>✕</button></div>
+          <div className="spawn-dialog__body">
+            <label>
+              <span>Agent ID <small>(required, lowercase)</small></span>
+              <input value={spawnId} onChange={(e) => setSpawnId(e.target.value)} placeholder="e.g. atlas, scout, ops" />
+            </label>
+            <label>
+              <span>Display Name</span>
+              <input value={spawnName} onChange={(e) => setSpawnName(e.target.value)} placeholder="e.g. Atlas, Scout" />
+            </label>
+            <label>
+              <span>Emoji</span>
+              <input value={spawnEmoji} onChange={(e) => setSpawnEmoji(e.target.value)} placeholder="e.g. 🧭 🎨 🔧" maxLength={4} style={{ width: 80 }} />
+            </label>
+          </div>
+          <div className="spawn-dialog__footer">
+            <button className="action-btn" onClick={() => setShowSpawn(false)}>Cancel</button>
+            <button className="action-btn action-btn--primary" onClick={handleSpawn} disabled={spawning || !spawnId.trim()}>
+              {spawning ? 'Spawning...' : 'Spawn'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Agent selector */}
       {loadingAgents && <p className="muted-sm">Loading agents...</p>}
@@ -69,7 +151,19 @@ export function SkillsPage({ apiBaseUrl }: { apiBaseUrl: string }) {
               <strong>{agent.name}</strong>
               <span>{agent.model}</span>
             </div>
-            {agent.isDefault && <span className="agent-selector__default">Default</span>}
+            <div className="agent-selector__actions">
+              {agent.isDefault && <span className="agent-selector__default">Default</span>}
+              {!agent.isDefault && (
+                <button
+                  className="agent-selector__delete"
+                  title={`Delete ${agent.name}`}
+                  onClick={(e) => { e.stopPropagation(); handleDelete(agent.id) }}
+                  disabled={deleting === agent.id}
+                >
+                  {deleting === agent.id ? '...' : '✕'}
+                </button>
+              )}
+            </div>
           </button>
         ))}
       </div>

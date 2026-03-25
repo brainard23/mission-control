@@ -175,6 +175,69 @@ export async function listAgentSessions() {
   }))
 }
 
+// --- Agent management (spawn / delete / set-identity) ---
+
+export async function spawnAgent(id, { name, emoji, model } = {}) {
+  if (!id || !/^[a-z0-9_-]+$/i.test(id)) throw new Error('Invalid agent id (alphanumeric, hyphens, underscores only)')
+
+  // Add the agent (name is positional, use --non-interactive + --workspace to skip prompts)
+  const workspace = `/home/node/.openclaw/workspace-${id}`
+  await openclawExec(`openclaw agents add ${id} --non-interactive --workspace ${workspace} --json`, { timeout: 30000, retries: 0 })
+    .catch((err) => {
+      // agents add may not output JSON — check raw
+      if (err.stdout?.includes('added') || err.stdout?.includes(id)) return { ok: true }
+      if (err.message?.includes('already exists')) throw new Error(`Agent "${id}" already exists`)
+      throw err
+    })
+
+  // Set identity if name or emoji provided
+  if (name || emoji) {
+    const parts = ['openclaw agents set-identity', `--agent ${id}`]
+    if (name) parts.push(`--name '${name.replace(/'/g, "'\\''")}'`)
+    if (emoji) parts.push(`--emoji '${emoji}'`)
+    try {
+      await openclawExec(parts.join(' '), { timeout: 15000, retries: 0 })
+    } catch {
+      // set-identity may not return JSON, that's ok
+    }
+  }
+
+  // Invalidate caches
+  skillsCache = null
+  skillsCacheAt = 0
+
+  return { id, name: name || id, emoji: emoji || null, model: model || null, spawned: true }
+}
+
+export async function deleteAgent(id) {
+  if (!id) throw new Error('Agent id is required')
+  try {
+    await openclawExec(`openclaw agents delete ${id} --force --json`, { timeout: 30000, retries: 0 })
+  } catch (err) {
+    // delete may not output JSON
+    if (err.stdout?.includes('deleted') || err.stdout?.includes(id)) return { deleted: true }
+    if (err.message?.includes('not found')) throw new Error(`Agent "${id}" not found`)
+    throw err
+  }
+  skillsCache = null
+  skillsCacheAt = 0
+  return { deleted: true }
+}
+
+export async function setAgentIdentity(id, { name, emoji } = {}) {
+  if (!id) throw new Error('Agent id is required')
+  const parts = ['openclaw agents set-identity', `--agent ${id}`]
+  if (name) parts.push(`--name '${name.replace(/'/g, "'\\''")}'`)
+  if (emoji) parts.push(`--emoji '${emoji}'`)
+  try {
+    await openclawExec(parts.join(' '), { timeout: 15000, retries: 0 })
+  } catch {
+    // may not return JSON
+  }
+  skillsCache = null
+  return { id, name, emoji, updated: true }
+}
+
 export async function getOneAgentDetail(agentId) {
   const data = await openclawExec(`openclaw sessions --agent ${agentId} --json`)
   const sessions = (data.sessions || []).map((s) => ({
