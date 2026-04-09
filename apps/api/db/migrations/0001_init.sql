@@ -33,7 +33,7 @@ create table if not exists agents (
 create table if not exists sessions (
   id text primary key,
   label text,
-  agent_id text not null references agents(id) on delete cascade,
+  agent_id text not null,
   runtime text not null,
   model text,
   state text not null,
@@ -67,7 +67,7 @@ create table if not exists tasks (
 create table if not exists placements (
   id text primary key,
   room_id text not null references rooms(id) on delete cascade,
-  agent_id text not null references agents(id) on delete cascade,
+  agent_id text not null,
   x integer not null,
   y integer not null,
   w integer not null,
@@ -85,9 +85,9 @@ create table if not exists events (
   kind text not null,
   severity text not null,
   message text not null,
-  agent_id text references agents(id) on delete set null,
-  session_id text references sessions(id) on delete set null,
-  task_id text references tasks(id) on delete set null,
+  agent_id text,
+  session_id text,
+  task_id text,
   metadata jsonb not null default '{}'::jsonb
 );
 
