@@ -52,7 +52,7 @@ create table if not exists tasks (
   description text,
   status text not null,
   priority text not null,
-  assigned_agent_id text references agents(id) on delete set null,
+  assigned_agent_id text,
   session_id text references sessions(id) on delete set null,
   blocker_reason text,
   tags jsonb not null default '[]'::jsonb,

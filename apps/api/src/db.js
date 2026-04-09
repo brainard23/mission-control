@@ -15,6 +15,11 @@ export async function initDb() {
   try {
     await pool.query('SELECT 1')
     console.log('Database connected')
+
+    // Drop FK on assigned_agent_id — agents can come from runtime, not just the DB
+    await pool.query(`
+      ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_assigned_agent_id_fkey
+    `).catch(() => {})
   } catch (error) {
     console.error('Database connection failed:', error.message)
     throw error

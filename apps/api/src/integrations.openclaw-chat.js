@@ -1,4 +1,4 @@
-import { openclawExec } from './lib/openclaw-exec.js'
+import { openclawExec, openclawExecRaw } from './lib/openclaw-exec.js'
 
 const AGENT_TIMEOUT = Number(process.env.OPENCLAW_AGENT_TIMEOUT || 180)
 
@@ -200,6 +200,18 @@ export async function spawnAgent(id, { name, emoji, model } = {}) {
     } catch {
       // set-identity may not return JSON, that's ok
     }
+  }
+
+  // Deploy Mission Control skill to the new agent's workspace
+  try {
+    const skillDir = `${workspace}/skills/mission-control`
+    const srcSkill = '/home/node/.openclaw/workspace/skills/mission-control/skill.md'
+    await openclawExecRaw(
+      `mkdir -p ${skillDir} && cp ${srcSkill} ${skillDir}/skill.md && echo deployed`,
+      { timeout: 10000 }
+    )
+  } catch {
+    // Non-critical — agent works without it
   }
 
   // Invalidate caches

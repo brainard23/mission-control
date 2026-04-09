@@ -475,6 +475,7 @@ export function DashboardLive(props: DashboardProps) {
           setState({ overview: p.overview, agentCards: p.agents, tasks: p.tasks, events: p.events, rooms: p.rooms.rooms, sessions: p.sessions })
         } else if (msg.type === 'agent.updated') setState((c) => ({ ...c, agentCards: upsertAgentCard(c.agentCards, msg.payload as AgentCard) }))
         else if (msg.type === 'task.updated') { const p = msg.payload as { task: Task }; setState((c) => ({ ...c, tasks: upsertById(c.tasks, p.task) })) }
+        else if (msg.type === 'task.deleted') { const p = msg.payload as { taskId: string }; setState((c) => ({ ...c, tasks: c.tasks.filter((t) => t.id !== p.taskId) })) }
         else if (msg.type === 'session.updated') { const p = msg.payload as { session: Session }; setState((c) => ({ ...c, sessions: upsertById(c.sessions, p.session) })) }
         else if (msg.type === 'event.created') { const p = msg.payload as { event: Event }; setState((c) => ({ ...c, events: upsertById(c.events, p.event).slice(0, 20) })) }
         else if (msg.type === 'health.updated') {

@@ -11,7 +11,7 @@ import {
   getTaskView,
   getTasksView,
 } from '../domain/services.js'
-import { assignTask, createTaskView, retryTask, sendSessionMessage, stopSession, updateTask } from '../domain/commands.js'
+import { assignTask, createTaskView, deleteTask, retryTask, sendSessionMessage, stopSession, updateTask } from '../domain/commands.js'
 import {
   agentIdParamSchema,
   assignTaskBodySchema,
@@ -111,6 +111,14 @@ export function registerRoutes(app) {
       return sendJson(reply, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${request.params.id} was not found` } })
     }
     return sendJson(reply, 200, { data: { task } })
+  })
+
+  app.delete('/api/v1/tasks/:id', { schema: { params: idParamSchema } }, async (request, reply) => {
+    const task = await deleteTask(request.params.id)
+    if (!task) {
+      return sendJson(reply, 404, { error: { code: 'TASK_NOT_FOUND', message: `Task ${request.params.id} was not found` } })
+    }
+    return sendJson(reply, 200, { data: { deleted: true, taskId: request.params.id } })
   })
 
   app.post('/api/v1/tasks/:id/assign', { schema: { params: idParamSchema, body: assignTaskBodySchema } }, async (request, reply) => {

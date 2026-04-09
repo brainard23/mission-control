@@ -2,6 +2,7 @@ import {
   appendEvent,
   appendTaskHistory,
   createTask,
+  deleteTask as repoDeleteTask,
   getAgent,
   getSession,
   getTask,
@@ -97,6 +98,7 @@ export async function updateTask(id, patch) {
   if (patch.description !== undefined) updatePatch.description = patch.description
   if (patch.status) updatePatch.status = patch.status
   if (patch.priority) updatePatch.priority = patch.priority
+  if (patch.assignedAgentId !== undefined) updatePatch.assignedAgentId = patch.assignedAgentId
   if (patch.blockerReason !== undefined) updatePatch.blockerReason = patch.blockerReason
   if (Array.isArray(patch.tags)) updatePatch.tags = patch.tags
   if (patch.metadata) updatePatch.metadata = { ...(existing.metadata || {}), ...patch.metadata }
@@ -147,6 +149,19 @@ export async function assignTask(taskId, agentId) {
 
   await emitTaskAndRelated(task)
   return task
+}
+
+export async function deleteTask(taskId) {
+  const existing = await getTask(taskId)
+  if (!existing) return null
+
+  const deleted = await repoDeleteTask(taskId)
+  if (!deleted) return null
+
+  emit('task.deleted', { taskId })
+  emit('overview.snapshot', await getDashboardSnapshot())
+  emitHealth()
+  return existing
 }
 
 export async function retryTask(taskId, reason) {

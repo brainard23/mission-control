@@ -124,8 +124,11 @@ export async function listAgents() {
 }
 
 export async function getAgent(id) {
-  // Check runtime agents first
-  const runtimeAgent = getRuntimeSnapshot().agents.find((a) => a.id === id)
+  // Check runtime agents first — try exact match, then agent_ prefix, then without prefix
+  const runtimeAgents = getRuntimeSnapshot().agents
+  const runtimeAgent = runtimeAgents.find((a) => a.id === id)
+    || runtimeAgents.find((a) => a.id === `agent_${id}`)
+    || runtimeAgents.find((a) => a.id.replace(/^agent_/, '') === id)
   if (runtimeAgent) return runtimeAgent
 
   const { rows } = await query('SELECT * FROM agents WHERE id = $1', [id])
@@ -292,6 +295,13 @@ export async function updateTask(id, patch) {
   const sql = `UPDATE tasks SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING *`
   const { rows } = await query(sql, values)
   return rows[0] ? rowToTask(rows[0]) : null
+}
+
+export async function deleteTask(id) {
+  await query('DELETE FROM task_history WHERE task_id = $1', [id])
+  await query('DELETE FROM events WHERE task_id = $1', [id])
+  const { rowCount } = await query('DELETE FROM tasks WHERE id = $1', [id])
+  return rowCount > 0
 }
 
 // --- Events ---

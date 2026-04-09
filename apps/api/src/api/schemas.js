@@ -30,6 +30,7 @@ export const updateTaskBodySchema = {
     description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     status: { type: 'string', minLength: 1 },
     priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
+    assignedAgentId: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     blockerReason: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     tags: {
       type: 'array',

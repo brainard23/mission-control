@@ -141,10 +141,13 @@ export function SkillsPage({ apiBaseUrl }: { apiBaseUrl: string }) {
       {loadingAgents && <p className="muted-sm">Loading agents...</p>}
       <div className="agent-selector">
         {agents.map((agent) => (
-          <button
+          <div
             key={agent.id}
+            role="button"
+            tabIndex={0}
             className={`agent-selector__btn${selected === agent.id ? ' agent-selector__btn--active' : ''}`}
             onClick={() => setSelected(agent.id)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(agent.id) } }}
           >
             <span className="agent-selector__emoji">{agent.emoji || '🤖'}</span>
             <div className="agent-selector__info">
@@ -164,7 +167,7 @@ export function SkillsPage({ apiBaseUrl }: { apiBaseUrl: string }) {
                 </button>
               )}
             </div>
-          </button>
+          </div>
         ))}
       </div>
 

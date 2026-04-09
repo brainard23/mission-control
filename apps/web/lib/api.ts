@@ -103,6 +103,16 @@ export async function assignTask(apiBaseUrl: string, id: string, agentId: string
   return mutateJson<{ task: Task }>(apiBaseUrl, `/api/v1/tasks/${id}/assign`, 'POST', { agentId })
 }
 
+export async function deleteTask(apiBaseUrl: string, id: string) {
+  const response = await fetch(`${apiBaseUrl}/api/v1/tasks/${id}`, { method: 'DELETE' })
+  const payload = (await response.json()) as ApiResponse<{ deleted: boolean; taskId: string }> | ApiError
+  if (!response.ok || !('data' in payload)) {
+    const message = 'error' in payload ? payload.error.message : 'Delete failed'
+    throw new Error(message)
+  }
+  return payload.data
+}
+
 export async function retryTask(apiBaseUrl: string, id: string, reason?: string) {
   return mutateJson<{ task: Task }>(apiBaseUrl, `/api/v1/tasks/${id}/retry`, 'POST', { reason })
 }

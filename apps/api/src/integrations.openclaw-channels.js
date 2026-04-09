@@ -1,14 +1,36 @@
 import { spawn } from 'node:child_process'
 import { openclawExec, openclawExecRaw, OPENCLAW_CONTAINER } from './lib/openclaw-exec.js'
 
+let channelsCache = null
+let channelsCacheAt = 0
+const CACHE_TTL = 30000 // 30s
+
 export async function listChannels() {
-  return openclawExec('openclaw channels list --json', { timeout: 45000 })
+  if (channelsCache && Date.now() - channelsCacheAt < CACHE_TTL) return channelsCache
+  try {
+    const result = await openclawExec('openclaw channels list --json', { timeout: 60000, retries: 1 })
+    channelsCache = result
+    channelsCacheAt = Date.now()
+    return result
+  } catch (err) {
+    // Return cached data if available, even if stale
+    if (channelsCache) return channelsCache
+    throw err
+  }
 }
 
+let statusCache = null
+let statusCacheAt = 0
+
 export async function getChannelStatus() {
+  if (statusCache && Date.now() - statusCacheAt < CACHE_TTL) return statusCache
   try {
-    return await openclawExec('openclaw channels status --json', { timeout: 45000 })
+    const result = await openclawExec('openclaw channels status --json', { timeout: 60000, retries: 1 })
+    statusCache = result
+    statusCacheAt = Date.now()
+    return result
   } catch {
+    if (statusCache) return statusCache
     return null
   }
 }
